@@ -152,10 +152,6 @@ def ai_provider(request):
         # For now, we'll just return the provided value
         return JsonResponse({"provider": provider})
 
-def landing_page(request):
-    """Render the marketing landing page."""
-    return render(request, 'marketing/landing.html')
-
 @csrf_exempt
 @require_http_methods(["POST"])
 @login_required
