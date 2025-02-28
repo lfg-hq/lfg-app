@@ -24,7 +24,7 @@ servers:
       traefik.http.routers.lfg-web_secure.tls.certresolver: dashboardresolver
     options:
       expose: 8000
-      health-cmd: "curl -f http://localhost:8000/health"
+      health-cmd: "curl -f http://localhost:8000/health/"
     proxy: false
     
   # Uncomment and configure additional roles as needed.
