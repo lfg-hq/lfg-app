@@ -1,0 +1,89 @@
+# Name of your application. Used to uniquely configure containers.
+service: lfg
+
+# Name of the container image.
+image: jitin2pillai/lfg
+
+ssh:
+  user: root
+
+# Deploy to these servers.
+servers:
+  web:
+    hosts:
+      - 5.161.59.97
+    labels:
+      traefik.enable: true
+      traefik.http.routers.lfg-web.rule: Host(`lfg.run`)
+      traefik.http.services.lfg-web.loadbalancer.server.port: 8000
+      traefik.http.routers.lfg-web.entrypoints: web
+      traefik.http.routers.lfg-web_secure.rule: Host(`lfg.run`)
+      traefik.http.routers.lfg-web_secure.entrypoints: websecure
+      traefik.http.routers.lfg-web_secure.tls.certresolver: dashboardresolver
+    options:
+      expose: 8000
+    proxy: false
+    # healthcheck:
+    #   path: /health/
+    #   port: 8000
+    
+  # job:
+  #   hosts:
+  #     - 192.168.0.1
+  #   cmd: bin/jobs
+
+# proxy: 
+#   ssl: false
+#   host: www.lfg.co
+#   app_port: 8000
+  # healthcheck: false
+    # interval: 3
+    # path: /health
+    # timeout: 3
+
+registry:
+  server: docker.io
+  username: 
+    - DOCKER_REGISTRY_TOKEN
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+builder:
+  arch: amd64
+
+
+# healthcheck:
+#   path: /health/
+#   port: 8000
+
+
+accessories:
+
+  traefik:
+    image: traefik:v2.10
+    # host: 178.156.151.84
+    service: traefik
+    port: 443
+    options:
+      volume:
+        - "/var/run/docker.sock:/var/run/docker.sock"
+    directories:
+      - "./letsencrypt/dashboard:/letsencrypt/dashboard"
+      # - "/var/run/docker.sock:/var/run/docker.sock"
+    cmd: "--api.insecure=true --entrypoints.websecure.address=:443 --entrypoints.traefik.address=:8080 --providers.docker=true --providers.docker.exposedbydefault=false --entryPoints.web.http.redirections.entryPoint.scheme=https --certificatesResolvers.dashboardresolver.acme.email=jitin@microgigs.ai --certificatesResolvers.dashboardresolver.acme.storage=/letsencrypt/dashboard/acme.json --certificatesResolvers.dashboardresolver.acme.tlschallenge=true"
+    labels:
+      traefik.enable: true
+      traefik.http.routers.traefik.rule: Host(`5.161.59.97`)
+      traefik.http.routers.traefik.service: api@internal
+      traefik.http.routers.traefik.entrypoints: traefik
+      traefik.http.routers.catchall.rule: HostRegexp(`{any:.*}`)
+      traefik.http.routers.catchall.entrypoints: web
+    roles:
+      - web
+
+
+env:
+  secret:
+    - OPENAI_API_KEY
+    - ANTHROPIC_API_KEY
+    - GEMINI_API_KEY

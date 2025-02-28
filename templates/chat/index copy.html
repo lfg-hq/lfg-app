@@ -1,0 +1,117 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LFG Chat 🚀🚀</title>
+    <link rel="stylesheet" href="{% static 'css/styles.css' %}">
+    <link rel="stylesheet" href="{% static 'css/artifacts.css' %}">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/marked/marked.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body data-user-authenticated="{% if user.is_authenticated %}true{% else %}false{% endif %}" 
+      >
+    <div class="app-container">
+        <div class="sidebar-overlay" id="sidebar-overlay"></div>
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-top-content">
+                <div class="sidebar-header">
+                    <h1>🚀🚀</h1>
+                    <div class="header-buttons">
+                        <button id="new-chat-btn">New Chat</button>
+                        <button id="toggle-sidebar-btn" class="toggle-sidebar-btn">
+                            <i class="fas fa-bars"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="conversation-list" id="conversation-list">
+                    <!-- Conversations will be loaded here -->
+                </div>
+            </div>
+            <div class="sidebar-bottom-content">
+                <div class="user-info">
+                    {% if user.is_authenticated %}
+                        <div class="user-avatar">
+                            {% if user.profile.avatar %}
+                                <img src="{{ user.profile.avatar.url }}" alt="{{ user.username }}'s avatar">
+                            {% else %}
+                                <div class="avatar-text">{{ user.username|first|upper }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="user-details">
+                            <span class="username">{{ user.username }}</span>
+                            <a href="{% url 'profile' %}" class="profile-link">Show Profile</a>
+                        </div>
+                    {% else %}
+                        <a href="{% url 'login' %}" class="login-button">Log In</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <div class="chat-container">
+            <div class="chat-messages" id="chat-messages">
+                <!-- Messages will appear here -->
+                <div class="message-container">
+                    <div class="welcome-message">
+                        <h2>LFG 🚀🚀</h2>
+                        <p>Start a conversation with the AI assistant below.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="chat-input-container">
+                <form id="chat-form">
+                    <textarea 
+                        id="chat-input" 
+                        placeholder="Type your message here..." 
+                        rows="1"
+                        autofocus
+                    ></textarea>
+                    <button type="submit" id="send-button">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="send-icon">
+                            <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" />
+                        </svg>
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Artifacts Panel -->
+        <div class="artifacts-container" id="artifacts-panel">
+            <div class="resize-handle" id="resize-handle"></div>
+            
+            <button class="artifacts-toggle" id="artifacts-toggle">
+                <i class="fas fa-chevron-left"></i>
+            </button>
+            
+            <div class="artifacts-header">
+                <h2>Artifacts</h2>
+            </div>
+            
+            <div class="artifacts-content">
+                <!-- Empty state (shown when no artifacts) -->
+                <div class="empty-state">
+                    <div class="empty-state-icon">
+                        <i class="fas fa-box-open"></i>
+                    </div>
+                    <div class="empty-state-text">
+                        No artifacts available yet. Artifacts will appear here as they are generated.
+                    </div>
+                </div>
+                
+                <!-- Artifacts will be added here dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="{% static 'js/chat.js' %}"></script>
+    <script src="{% static 'js/sidebar.js' %}"></script>
+    <script src="{% static 'js/artifacts.js' %}"></script>
+
+    {% csrf_token %}
+</body>
+</html> 
