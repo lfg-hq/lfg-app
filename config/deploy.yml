@@ -12,6 +12,8 @@ servers:
   web:
     hosts:
       - 5.161.59.97
+    # Uncomment and adjust the command if you need to run migrations or similar:
+    # cmd: python manage.py migrate && python manage.py runserver
     labels:
       traefik.enable: true
       traefik.http.routers.lfg-web.rule: Host(`lfg.run`)
@@ -22,24 +24,14 @@ servers:
       traefik.http.routers.lfg-web_secure.tls.certresolver: dashboardresolver
     options:
       expose: 8000
+      health-cmd: "curl -f http://localhost:8000/health"
     proxy: false
-    healthcheck:
-      path: /health/
-      port: 8000
     
+  # Uncomment and configure additional roles as needed.
   # job:
   #   hosts:
   #     - 192.168.0.1
   #   cmd: bin/jobs
-
-# proxy: 
-#   ssl: false
-#   host: www.lfg.co
-#   app_port: 8000
-  # healthcheck: false
-    # interval: 3
-    # path: /health
-    # timeout: 3
 
 registry:
   server: docker.io
@@ -51,14 +43,7 @@ registry:
 builder:
   arch: amd64
 
-
-# healthcheck:
-#   path: /health/
-#   port: 8000
-
-
 accessories:
-
   traefik:
     image: traefik:v2.10
     # host: 178.156.151.84
@@ -69,7 +54,6 @@ accessories:
         - "/var/run/docker.sock:/var/run/docker.sock"
     directories:
       - "./letsencrypt/dashboard:/letsencrypt/dashboard"
-      # - "/var/run/docker.sock:/var/run/docker.sock"
     cmd: "--api.insecure=true --entrypoints.websecure.address=:443 --entrypoints.traefik.address=:8080 --providers.docker=true --providers.docker.exposedbydefault=false --entryPoints.web.http.redirections.entryPoint.scheme=https --certificatesResolvers.dashboardresolver.acme.email=jitin@microgigs.ai --certificatesResolvers.dashboardresolver.acme.storage=/letsencrypt/dashboard/acme.json --certificatesResolvers.dashboardresolver.acme.tlschallenge=true"
     labels:
       traefik.enable: true
@@ -80,7 +64,6 @@ accessories:
       traefik.http.routers.catchall.entrypoints: web
     roles:
       - web
-
 
 env:
   secret:
