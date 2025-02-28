@@ -25,7 +25,6 @@ COPY . /app/
 # Create the staticfiles directory
 RUN mkdir -p /app/staticfiles
 
-# Collect static files (if your project uses Django's staticfiles app).
 RUN python manage.py collectstatic --noinput
 
 # Run migrations

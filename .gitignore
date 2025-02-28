@@ -105,6 +105,10 @@ jspm_packages/
 .env.test
 .env.production
 
+.env
+env.sh
+env.prod.sh
+
 # Ruby/Rails specific
 *.gem
 *.rbc
