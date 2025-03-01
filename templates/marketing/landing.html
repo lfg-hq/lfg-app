@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>LFG 🚀 | From Ideas to Reality</title>
     <link rel="shortcut icon" type="image/x-icon" href="/static/images/favicon.ico">
     <link rel="stylesheet" href="/static/css/landing.css">
@@ -18,9 +18,12 @@
         <div class="logo">
             <span class="logo-text">LFG</span>
             <span class="logo-emoji">
-                <div class="rocket_logo"><img src="/static/images/logo_lfg.png" alt="LFG Logo" width="40px"></div>
+                <div class="rocket_logo"><img src="/static/images/logo_lfg.png" alt="LFG Logo" width="30px"></div>
             </span>
         </div>
+        <button class="mobile-menu-toggle" aria-label="Toggle navigation menu">
+            <i class="fas fa-bars"></i>
+        </button>
         <nav>
             <ul>
                 <li><a href="#features">Features</a></li>
@@ -30,7 +33,7 @@
             </ul>
         </nav>
         <div class="cta-button">
-            <a href="/chat/" class="button primary-button">Launch App</a>
+            <a href="/chat/" class="button header-button">Launch App</a>
         </div>
     </header>
 
@@ -353,5 +356,29 @@ Complete!</code></pre>
     </footer>
 
     <script src="/static/js/landing.js"></script>
+    <script>
+        // Mobile menu toggle
+        document.addEventListener('DOMContentLoaded', function() {
+            const mobileMenuToggle = document.querySelector('.mobile-menu-toggle');
+            const nav = document.querySelector('nav');
+            
+            if (mobileMenuToggle) {
+                mobileMenuToggle.addEventListener('click', function() {
+                    nav.classList.toggle('active');
+                    const isExpanded = nav.classList.contains('active');
+                    mobileMenuToggle.setAttribute('aria-expanded', isExpanded);
+                });
+            }
+            
+            // Close mobile menu when clicking on a nav link
+            const navLinks = document.querySelectorAll('nav a');
+            navLinks.forEach(link => {
+                link.addEventListener('click', function() {
+                    nav.classList.remove('active');
+                    mobileMenuToggle.setAttribute('aria-expanded', 'false');
+                });
+            });
+        });
+    </script>
 </body>
 </html> 
