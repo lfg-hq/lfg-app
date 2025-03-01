@@ -5,32 +5,34 @@ FROM python:3.10-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+# Set work directory inside the container.
+WORKDIR /app
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Set work directory inside the container.
-WORKDIR /app
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install dependencies.
-# It's a good idea to copy only the requirements first for caching.
-COPY requirements.txt /app/
-RUN pip install --upgrade pip && pip install -r requirements.txt
+# Copy project
+COPY . .
 
-# Copy the project files into the container.
-COPY . /app/
+# Create directory for SQLite database and set permissions
+RUN mkdir -p /app/data && \
+    chmod 777 /app/data
 
-# Create the staticfiles directory
-RUN mkdir -p /app/staticfiles
+# Run migrations
+# RUN python manage.py migrate --noinput
 
-RUN python manage.py collectstatic --noinput
+# Run as non-root user
+RUN useradd -m myuser
+USER myuser
 
-
-
-# Expose port 8000 for the Django app.
 EXPOSE 8000
 
-# Command to run the Django development server.
+# Command to run the application
 CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
