@@ -28,11 +28,6 @@ servers:
     proxy: false
     cmd: sh -c "python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000"
     
-  # Uncomment and configure additional roles as needed.
-  # job:
-  #   hosts:
-  #     - 192.168.0.1
-  #   cmd: bin/jobs
 
 env:
   secret:
@@ -44,6 +39,7 @@ env:
     - OPENAI_API_KEY
     - ANTHROPIC_API_KEY
     - GEMINI_API_KEY
+    
 
 registry:
   server: docker.io
@@ -97,8 +93,3 @@ accessories:
     roles:
       - web
 
-env:
-  secret:
-    - OPENAI_API_KEY
-    - ANTHROPIC_API_KEY
-    - GEMINI_API_KEY

@@ -9,63 +9,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Testimonial slider
-    const testimonials = document.querySelectorAll('.testimonial');
-    const dots = document.querySelectorAll('.dot');
-    const prevButton = document.querySelector('.prev-button');
-    const nextButton = document.querySelector('.next-button');
-    let currentTestimonial = 0;
-    
-    // Hide all testimonials except the first one
-    testimonials.forEach((testimonial, index) => {
-        if (index !== 0) {
-            testimonial.style.display = 'none';
-        }
-    });
-    
-    // Show a specific testimonial
-    function showTestimonial(index) {
-        testimonials.forEach(testimonial => {
-            testimonial.style.display = 'none';
-        });
-        testimonials[index].style.display = 'block';
-        
-        // Update active dot
-        dots.forEach(dot => {
-            dot.classList.remove('active');
-        });
-        dots[index].classList.add('active');
-        
-        currentTestimonial = index;
-    }
-    
-    // Event listeners for dots
-    dots.forEach((dot, index) => {
-        dot.addEventListener('click', () => {
-            showTestimonial(index);
-        });
-    });
-    
-    // Event listeners for prev/next buttons
-    prevButton.addEventListener('click', () => {
-        let index = currentTestimonial - 1;
-        if (index < 0) index = testimonials.length - 1;
-        showTestimonial(index);
-    });
-    
-    nextButton.addEventListener('click', () => {
-        let index = currentTestimonial + 1;
-        if (index >= testimonials.length) index = 0;
-        showTestimonial(index);
-    });
-    
-    // Auto-rotate testimonials
-    setInterval(() => {
-        let index = currentTestimonial + 1;
-        if (index >= testimonials.length) index = 0;
-        showTestimonial(index);
-    }, 8000);
-    
     // Animate the airplane path
     const airplane = document.querySelector('.airplane');
     
