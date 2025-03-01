@@ -63,7 +63,7 @@ accessories:
     port: 5432
     env:
       clear:
-        POSTGRES_DB: easylogs_prod
+        POSTGRES_DB: lfg_prod
       secret:
         - POSTGRES_USER
         - POSTGRES_PASSWORD

@@ -27,8 +27,6 @@ RUN mkdir -p /app/staticfiles
 
 RUN python manage.py collectstatic --noinput
 
-# Run migrations
-RUN python manage.py migrate --noinput
 
 
 # Expose port 8000 for the Django app.
