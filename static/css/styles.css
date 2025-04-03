@@ -86,29 +86,71 @@ body, html {
 
 /* Add subtle glow to active conversation */
 .conversation-item.active {
-    background-color: rgba(187, 134, 252, 0.15);
-    border-left: 2px solid var(--primary-color);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), 0 0 15px rgba(187, 134, 252, 0.1);
+    background-color: rgba(187, 134, 252, 0.2); /* Using primary color for consistency */
+    border-left: 3px solid var(--primary-color); /* Thicker border */
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), 0 0 15px rgba(187, 134, 252, 0.15); /* Enhanced glow */
+    font-weight: 600; /* Make text bolder */
 }
 
-/* Add subtle hover effect to the new chat button */
+.conversation-item.active .conversation-title {
+    color: var(--primary-color); /* Highlight active conversation text */
+}
+
+/* Update hover effect for the new chat button */
 #new-chat-btn {
-    background: linear-gradient(135deg, var(--primary-color), #9d65e5);
-    color: #121212;
-    border: none;
-    padding: 8px 12px;
-    border-radius: 8px;
+    background: var(--card-bg); /* Use a neutral card background */
+    color: var(--text-secondary); /* Use secondary text color for the icon */
+    border: 1px solid var(--border-color); /* Add a subtle border */
+    padding: 8px; /* Adjust padding for an icon */
+    width: 36px; /* Set fixed width */
+    height: 36px; /* Set fixed height */
+    border-radius: 6px; 
     cursor: pointer;
-    font-weight: 600;
-    font-size: 0.85rem;
-    letter-spacing: 0.3px;
+    font-weight: normal; /* Remove bold */
+    font-size: 1.2rem; /* Increase size for icon visibility */
+    line-height: 1; /* Ensure icon is centered vertically */
+    display: flex; /* Use flexbox for alignment */
+    align-items: center;
+    justify-content: center;
     transition: all 0.2s ease;
-    box-shadow: 0 2px 8px rgba(187, 134, 252, 0.3);
+    box-shadow: none; /* Remove the bright shadow */
+}
+
+#new-chat-btn:hover {
+    background-color: var(--hover-color); /* Subtle background change on hover */
+    color: var(--text-color); /* Slightly brighter icon on hover */
+    border-color: var(--text-secondary);
+}
+
+/* Style for the new Back button */
+#back-btn {
+    background: var(--card-bg); /* Use a neutral card background */
+    color: var(--text-secondary); /* Use secondary text color for the icon */
+    border: 1px solid var(--border-color); /* Add a subtle border */
+    padding: 8px; /* Adjust padding for an icon */
+    width: 36px; /* Set fixed width */
+    height: 36px; /* Set fixed height */
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: normal; /* Remove bold */
+    font-size: 1.2rem; /* Increase size for icon visibility */
+    line-height: 1; /* Ensure icon is centered vertically */
+    display: flex; /* Use flexbox for alignment */
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    box-shadow: none; /* Remove any shadow */
+}
+
+#back-btn:hover {
+    background-color: var(--hover-color); /* Subtle background change on hover */
+    color: var(--text-color); /* Slightly brighter icon on hover */
+    border-color: var(--text-secondary);
 }
 
 /* Enhance the sidebar header */
 .sidebar-header {
-    padding: 16px;
+    padding: 8px 12px; /* Reduced from 16px */
     border-bottom: 1px solid rgba(51, 51, 51, 0.5);
     display: flex;
     justify-content: space-between;
@@ -119,7 +161,7 @@ body, html {
 }
 
 .sidebar-header h1 {
-    font-size: 1.5rem;
+    font-size: 1.2rem; /* Reduced from 1.5rem */
     color: var(--primary-color);
     text-shadow: 0 0 10px rgba(187, 134, 252, 0.3);
     font-weight: 600;
@@ -129,52 +171,117 @@ body, html {
 .conversation-list {
     flex: 1;
     overflow-y: auto;
-    padding: 15px 10px;
-    padding-bottom: 80px; /* Ensure content doesn't get hidden behind bottom content */
+    padding: 10px 8px; /* Increased padding for better spacing */
+    padding-bottom: 60px; /* Reduced padding at bottom */
     background-color: rgba(30, 30, 30, 0.4);
     backdrop-filter: blur(10px);
+    /* Make scrollbar invisible while keeping functionality */
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE and Edge */
 }
 
+/* Hide webkit scrollbar for conversation-list */
+.conversation-list::-webkit-scrollbar {
+    display: none;
+}
+
+/* Project badges in sidebar */
 .conversation-item {
-    padding: 12px 15px;
-    margin-bottom: 8px;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    border-left: 2px solid transparent;
-    font-size: 0.95rem;
     position: relative;
-    overflow: hidden;
+    display: flex;
+    align-items: center;
+    gap: 8px; /* Increased gap between elements */
+    padding: 8px 1px; /* Increased padding for more space */
+    margin-bottom: 4px; /* More space between items */
+    border-radius: 6px; /* Increased border radius for softer look */
+    cursor: pointer;
+    transition: all 0.3s ease; /* Slightly slower transition for smoother effect */
+    font-size: 0.85rem; /* Slightly larger font */
+    min-height: 32px; /* Increased minimum height for better touch targets */
+    border-left: 2px solid transparent; /* Transparent border by default */
 }
 
 .conversation-item:hover {
-    background-color: rgba(44, 44, 44, 0.7);
-    transform: translateX(2px);
+    background-color: rgba(187, 134, 252, 0.15); /* Slightly more visible hover background */
+    transform: translateX(3px); /* Slightly more movement on hover */
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1); /* Subtle shadow on hover */
+    border-left: 2px solid rgba(187, 134, 252, 0.5); /* Partial border on hover */
 }
 
-.conversation-item:after {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 0;
-    height: 100%;
-    width: 0;
-    background: linear-gradient(90deg, rgba(187, 134, 252, 0.1), transparent);
-    transition: width 0.3s ease;
-    z-index: -1;
+.conversation-item:hover .delete-conversation-btn {
+    opacity: 1;
 }
 
-.conversation-item:hover:after {
-    width: 100%;
+.conversation-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.8rem; /* Larger font size */
+    max-width: none; /* Remove max-width limitation */
+    letter-spacing: 0.2px; /* Improve readability */
+    color: var(--text-color); /* Ensure consistent text color */
+    transition: color 0.2s ease; /* Smooth color transition */
 }
 
-.conversation-item.active {
-    background-color: rgba(187, 134, 252, 0.15);
-    border-left: 2px solid var(--primary-color);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), 0 0 15px rgba(187, 134, 252, 0.1);
+.conversation-item:hover .conversation-title {
+    color: var(--primary-color); /* Highlight text on hover */
+}
+
+.delete-conversation-btn {
+    background: none;
+    border: none;
+    color: #6b7280;
+    cursor: pointer;
+    padding: 4px 6px; /* Slightly larger touch target */
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    font-size: 12px; /* Slightly larger for better visibility */
+    opacity: 0;
+    display: flex; /* Ensure icon is properly centered */
+    align-items: center;
+    justify-content: center;
+}
+
+.delete-conversation-btn:hover {
+    background-color: rgba(239, 68, 68, 0.2); /* More visible hover effect */
+    color: rgba(239, 68, 68, 0.9); /* Brighter red on hover */
+    transform: scale(1.1); /* Slight scale effect */
+}
+
+.project-badge {
+    display: none;
+}
+
+.empty-conversations-message {
+    text-align: center;
+    padding: 20px;
+    color: #6b7280;
+    font-style: italic;
+}
+
+/* Dark mode support for conversation items */
+.dark-mode .conversation-item:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-left-color: rgba(187, 134, 252, 0.5);
+}
+
+.dark-mode .conversation-item.active {
+    background-color: rgba(187, 134, 252, 0.2);
+    border-left-color: var(--primary-color);
+}
+
+.dark-mode .delete-conversation-btn {
+    color: #9ca3af;
+}
+
+.dark-mode .project-badge {
+    background-color: rgba(99, 102, 241, 0.2);
+    color: #818cf8;
+}
+
+.dark-mode .empty-conversations-message {
+    color: #9ca3af;
 }
 
 /* Chat container styles */
@@ -257,6 +364,20 @@ body, html {
     border-bottom-left-radius: 2px;
 }
 
+/* Add styling for system messages */
+.message.system {
+    background-color: rgba(255, 193, 7, 0.15);
+    border: 1px solid rgba(255, 193, 7, 0.3);
+    color: var(--text-color);
+    align-self: flex-start;
+    border-radius: 4px;
+    font-style: italic;
+    max-width: 70%;
+    text-align: left;
+    font-size: 0.9rem;
+    padding: 8px 8px 0px 8px;
+}
+
 .message-content {
     overflow-wrap: break-word;
 }
@@ -308,6 +429,16 @@ body, html {
     transition: all 0.3s ease;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 0 20px rgba(187, 134, 252, 0.05); /* Enhanced glow */
     backdrop-filter: blur(5px); /* Subtle blur effect */
+    
+    /* Hide scrollbar but maintain scrolling functionality */
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE and Edge */
+    overflow-y: auto;
+}
+
+/* Hide webkit scrollbar for chat input */
+#chat-input::-webkit-scrollbar {
+    display: none;
 }
 
 #chat-input:focus {
@@ -317,23 +448,53 @@ body, html {
     transform: translateY(-2px); /* Subtle lift effect when focused */
 }
 
-#send-button {
-    background: none;
+/* Send button styling */
+#send-btn {
+    background-color: var(--primary-color);
+    color: #1e1e1e;
     border: none;
-    color: var(--primary-color);
+    border-radius: 50%;
+    width: 38px;
+    height: 38px;
+    font-size: 16px;
     cursor: pointer;
-    padding: 8px;
-    margin-left: 12px;
-    transition: transform 0.2s ease;
+    margin-left: 10px;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-#send-button:hover {
+#send-btn:hover {
     transform: scale(1.1);
+    box-shadow: 0 0 10px rgba(187, 134, 252, 0.7);
+}
+
+/* Stop button styling */
+#stop-btn {
+    background-color: #ef5350; /* Red color for stop */
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 38px;
+    height: 38px;
+    font-size: 16px;
+    cursor: pointer;
+    margin-left: 10px;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#stop-btn:hover {
+    transform: scale(1.1);
+    box-shadow: 0 0 10px rgba(239, 83, 80, 0.7);
 }
 
 .send-icon {
-    width: 28px;
-    height: 28px;
+    width: 18px;
+    height: 18px;
 }
 
 /* Markdown styling */
@@ -467,29 +628,30 @@ body, html {
 .user-info {
     display: flex;
     align-items: center;
-    padding: 15px;
+    padding: 6px 8px; /* Further reduced padding */
     width: 100%;
     transition: all 0.3s ease;
+    min-height: 42px; /* Set minimum height */
 }
 
 .user-avatar {
-    width: 38px;
-    height: 38px;
+    width: 26px; /* Further reduced size */
+    height: 26px; /* Further reduced size */
     border-radius: 50%;
     overflow: hidden;
-    margin-right: 0.75rem;
+    margin-right: 0.4rem; /* Reduced margin */
     background-color: rgba(187, 134, 252, 0.2);
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2); /* Smaller shadow */
     border: 1px solid rgba(187, 134, 252, 0.3);
 }
 
 .avatar-text {
     color: var(--primary-color);
     font-weight: 600;
-    font-size: 1.1rem;
+    font-size: 0.9rem; /* Reduced from 1.1rem */
 }
 
 .user-details {
@@ -499,13 +661,13 @@ body, html {
 
 .username {
     font-weight: 600;
-    margin-bottom: 0.25rem;
-    font-size: 0.95rem;
+    margin-bottom: 0.15rem; /* Reduced from 0.25rem */
+    font-size: 0.85rem; /* Reduced from 0.95rem */
     letter-spacing: 0.3px;
 }
 
 .profile-link {
-    font-size: 0.8rem;
+    font-size: 0.75rem; /* Reduced from 0.8rem */
     color: var(--text-secondary);
     transition: all 0.2s ease;
     opacity: 0.8;
@@ -547,7 +709,7 @@ body, html {
 
 /* Expanded sidebar styles */
 .sidebar.expanded {
-    width: 280px;
+    width: 200px; /* Further reduced from 220px */
     box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
     background-color: rgba(30, 30, 30, 0.7); /* Semi-transparent background */
     backdrop-filter: blur(15px); /* Blur effect for glass morphism */
@@ -631,7 +793,13 @@ body, html {
     flex-direction: column;
     overflow-y: auto; /* Allow scrolling of top content */
     height: calc(100% - 70px); /* Leave space for bottom content */
-    scrollbar-width: thin;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE and Edge */
+}
+
+/* Hide webkit scrollbar for sidebar-top-content */
+.sidebar-top-content::-webkit-scrollbar {
+    display: none;
 }
 
 /* Fix sidebar bottom content at the bottom */
@@ -642,8 +810,8 @@ body, html {
     width: 100%;
     background-color: rgba(30, 30, 30, 0.8);
     border-top: 1px solid rgba(51, 51, 51, 0.5);
-    z-index: 2; /* Ensure it appears above scrollable content */
-    box-shadow: 0 -4px 15px rgba(0, 0, 0, 0.15); /* Enhanced shadow for separation */
+    z-index: 2;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.15); /* Reduced shadow */
     backdrop-filter: blur(10px);
 }
 
@@ -699,6 +867,8 @@ body, html {
 }
 
 /* Custom scrollbar for sidebar */
+/* Removed these styles as we're now hiding the scrollbar */
+/* 
 .sidebar-top-content::-webkit-scrollbar {
     width: 4px;
 }
@@ -715,6 +885,7 @@ body, html {
 .sidebar-top-content::-webkit-scrollbar-thumb:hover {
     background: rgba(187, 134, 252, 0.4);
 }
+*/
 
 .chat-messages {
     flex: 1;
@@ -726,4 +897,74 @@ body, html {
     align-items: center; /* Center the messages container */
     background: linear-gradient(to bottom, var(--bg-color) 90%, transparent); /* Subtle gradient at bottom */
     scroll-behavior: smooth; /* Smooth scrolling */
+}
+
+/* Project context in chat */
+.project-context {
+    margin-top: 20px;
+    padding: 15px;
+    background-color: rgba(99, 102, 241, 0.1);
+    border-radius: 8px;
+    border-left: 4px solid #6366f1;
+}
+
+.project-context .project-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.875rem;
+    font-weight: 500;
+    margin-bottom: 8px;
+    padding: 4px 10px;
+    background-color: rgba(99, 102, 241, 0.15);
+    border-radius: 9999px;
+}
+
+.project-context .project-icon {
+    margin-right: 6px;
+}
+
+.project-context .project-name {
+    color: #4f46e5;
+}
+
+.project-context p {
+    margin: 0;
+    color: #4b5563;
+}
+
+/* Dark mode support */
+.dark-mode .project-context {
+    background-color: rgba(99, 102, 241, 0.15);
+    border-left-color: #818cf8;
+}
+
+.dark-mode .project-context .project-badge {
+    background-color: rgba(99, 102, 241, 0.25);
+}
+
+.dark-mode .project-context .project-name {
+    color: #818cf8;
+}
+
+.dark-mode .project-context p {
+    color: #9ca3af;
+}
+
+/* Additional styling for compact conversation items */
+.conversation-item .conversation-title {
+    max-width: 150px; /* Limit text width */
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Even smaller delete button that only shows on hover */
+.delete-conversation-btn {
+    font-size: 10px; /* Tiny icon */
+    padding: 1px;
+    opacity: 0;
+}
+
+/* Hide the project badge until hover for even more compact display */
+@media (max-width: 1200px) {
+    /* Empty - we don't need project badge display rules anymore */
 } 

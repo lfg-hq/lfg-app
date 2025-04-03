@@ -3,38 +3,52 @@ document.addEventListener('DOMContentLoaded', () => {
     const appContainer = document.querySelector('.app-container');
     const sidebarOverlay = document.getElementById('sidebar-overlay');
     
-    // Function to determine if mouse is in the left 10% of screen
-    function isInLeftZone(e) {
+    // Function to determine if mouse is in the left zone for appearance
+    function isInAppearZone(e) {
         const screenWidth = window.innerWidth;
-        const hoverZoneWidth = screenWidth * 0.1; // 10% of screen width
-        return e.clientX <= hoverZoneWidth;
+        const appearZoneWidth = screenWidth * 0.1; // 10% of screen width
+        return e.clientX <= appearZoneWidth;
     }
     
-    // Expand sidebar when mouse enters the left zone
+    // Function to determine if mouse is far enough to hide sidebar
+    function isInHideZone(e) {
+        const screenWidth = window.innerWidth;
+        const hideZoneWidth = screenWidth * 0.2; // 20% of screen width
+        return e.clientX > hideZoneWidth;
+    }
+    
+    // Track sidebar state for better control
+    let isSidebarExpanded = false;
+    
+    // Expand sidebar when mouse enters the left zone, hide only when moving past 20%
     document.addEventListener('mousemove', (e) => {
-        if (isInLeftZone(e)) {
+        if (isInAppearZone(e) && !isSidebarExpanded) {
             sidebar.classList.add('expanded');
             appContainer.classList.add('sidebar-expanded');
-        } else {
+            isSidebarExpanded = true;
+        } else if (isInHideZone(e) && isSidebarExpanded) {
             sidebar.classList.remove('expanded');
             appContainer.classList.remove('sidebar-expanded');
+            isSidebarExpanded = false;
         }
     });
     
     // Handle touch devices - toggle on sidebar touch
     sidebar.addEventListener('touchstart', (e) => {
-        if (!sidebar.classList.contains('expanded')) {
+        if (!isSidebarExpanded) {
             e.preventDefault();
             sidebar.classList.add('expanded');
             appContainer.classList.add('sidebar-expanded');
+            isSidebarExpanded = true;
         }
     });
     
     // Close on touch outside sidebar
     document.addEventListener('touchstart', (e) => {
-        if (sidebar.classList.contains('expanded') && !sidebar.contains(e.target)) {
+        if (isSidebarExpanded && !sidebar.contains(e.target)) {
             sidebar.classList.remove('expanded');
             appContainer.classList.remove('sidebar-expanded');
+            isSidebarExpanded = false;
         }
     });
     
@@ -42,5 +56,6 @@ document.addEventListener('DOMContentLoaded', () => {
     sidebarOverlay.addEventListener('click', () => {
         sidebar.classList.remove('expanded');
         appContainer.classList.remove('sidebar-expanded');
+        isSidebarExpanded = false;
     });
 }); 

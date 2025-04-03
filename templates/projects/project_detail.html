@@ -1,0 +1,94 @@
+{% extends 'projects/base_projects.html' %}
+
+{% block title %}{{ project.name }} - LFG 🚀🚀{% endblock %}
+
+{% block content %}
+<div class="projects-container">
+    <div class="project-header">
+        <div class="large-project-icon">{{ project.icon }}</div>
+        <div class="project-header-content">
+            <h1 class="project-header-name">{{ project.name }}</h1>
+            <div class="project-header-meta">
+                <span><i class="fas fa-calendar"></i> Created {{ project.created_at|date:"M d, Y" }}</span>
+                <span><i class="fas fa-clock"></i> Last updated {{ project.updated_at|date:"M d, Y" }}</span>
+                <span class="project-status project-status-{{ project.status }}">{{ project.status }}</span>
+            </div>
+        </div>
+        <div class="project-header-actions">
+            <a href="{% url 'create_conversation' project.id %}" class="btn btn-primary">
+                <i class="fas fa-comment"></i> New Chat
+            </a>
+            <a href="{% url 'update_project' project.id %}" class="btn btn-outline">
+                <i class="fas fa-edit"></i> Edit
+            </a>
+            <form action="{% url 'delete_project' project.id %}" method="post" class="d-inline">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-danger delete-project-btn" data-project-name="{{ project.name }}">
+                    <i class="fas fa-trash-alt"></i> Delete
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="project-description-section">
+        <div class="card">
+            <h2 class="section-title">About this project</h2>
+            <div class="project-description-content">
+                {% if project.description %}
+                    {{ project.description }}
+                {% else %}
+                    <p class="text-muted">No description provided</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="project-content">
+        <div class="page-section">
+            <h2 class="section-title">Project Conversations</h2>
+            
+            {% if project.conversations.all %}
+                <div class="conversations-grid grid-2">
+                    {% for conversation in project.conversations.all|dictsortreversed:"updated_at" %}
+                        <a href="{% url 'conversation_detail' conversation.id %}" class="card conversation-card">
+                            <div class="conversation-icon">
+                                <i class="fas fa-comments"></i>
+                            </div>
+                            <div class="conversation-content">
+                                <h3 class="conversation-title">{{ conversation.title }}</h3>
+                                <div class="conversation-meta">
+                                    <span><i class="fas fa-calendar"></i> {{ conversation.created_at|date:"M d, Y" }}</span>
+                                    <span><i class="fas fa-message"></i> {{ conversation.messages.count }} messages</span>
+                                </div>
+                            </div>
+                        </a>
+                    {% endfor %}
+                    
+                    <!-- New conversation card -->
+                    <a href="{% url 'create_conversation' project.id %}" class="card conversation-card create-conversation-btn">
+                        <div class="create-conversation-btn-icon">
+                            <i class="fas fa-plus-circle"></i>
+                        </div>
+                        <div class="create-conversation-btn-text">
+                            Start New Conversation
+                        </div>
+                    </a>
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <div class="empty-state-icon">
+                        <i class="fas fa-comments"></i>
+                    </div>
+                    <h3 class="empty-state-title">No conversations yet</h3>
+                    <div class="empty-state-text">
+                        Start a conversation to interact with AI about this project.
+                    </div>
+                    <a href="{% url 'create_conversation' project.id %}" class="btn btn-primary">
+                        <i class="fas fa-comment"></i> Start First Conversation
+                    </a>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %} 

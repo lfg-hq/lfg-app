@@ -26,9 +26,11 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
+    'channels',
     'chat',
-    'users',
+    'accounts',
     'marketing',
+    'projects',
 ]
 
 MIDDLEWARE = [
@@ -61,17 +63,30 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'LFG.wsgi.application'
+ASGI_APPLICATION = 'LFG.asgi.application'
+
+# Channel layers configuration
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        # For production, consider using Redis:
+        # 'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        # 'CONFIG': {
+        #     "hosts": [(os.environ.get('REDIS_HOST', 'redis'), 6379)],
+        # },
+    },
+}
 
 DATABASES = {
+    # 'default': {
+    #     'ENGINE': 'django.db.backends.postgresql',
+    #     'NAME': os.environ.get('POSTGRES_DB', 'easylogs_dev'),
+    #     'USER': os.environ.get('POSTGRES_USER', 'postgres'),
+    #     'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'Test0123!'),
+    #     'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
+    #     'PORT': os.environ.get('POSTGRES_PORT', '5432'),
+    # },
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.environ.get('POSTGRES_DB', 'easylogs_dev'),
-        'USER': os.environ.get('POSTGRES_USER', 'postgres'),
-        'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'Test0123!'),
-        'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
-        'PORT': os.environ.get('POSTGRES_PORT', '5432'),
-    },
-    'sqlite': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
     }
@@ -81,8 +96,6 @@ DATABASES = {
 import sys
 if 'test' in sys.argv:
     DATABASES['default'] = DATABASES['sqlite']
-
-
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -107,11 +120,11 @@ USE_I18N = True
 USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, 'static'),
+    BASE_DIR / "static",  # Your JS files location
 ]
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Media files (User uploaded content)
 MEDIA_URL = '/media/'
@@ -126,6 +139,23 @@ CORS_ALLOW_ALL_ORIGINS = True
 # AI Provider Selection Feature
 AI_PROVIDER_DEFAULT = 'openai'  # Default provider 
 
-LOGIN_URL = '/login/'
-LOGIN_REDIRECT_URL = '/'
-LOGOUT_REDIRECT_URL = '/login/' 
+# Authentication URLs
+LOGIN_URL = '/accounts/login/'
+LOGIN_REDIRECT_URL = '/chat/'  # Redirect to chat page after successful login
+LOGOUT_REDIRECT_URL = '/accounts/login/'
+
+# Authentication backends
+AUTHENTICATION_BACKENDS = [
+    'accounts.backends.EmailBackend',  # Custom email backend
+    'django.contrib.auth.backends.ModelBackend',  # Default Django backend
+]
+
+# Email Configuration
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'  # For development - outputs to console
+# EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'  # For production
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', 587))
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'noreply@lfg.run') 

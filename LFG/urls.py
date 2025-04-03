@@ -7,7 +7,8 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('marketing.urls')),  # Marketing URLs (including landing page)
     path('', include('chat.urls')),
-    path('', include('users.urls')),
+    path('accounts/', include('accounts.urls')),
+    path('projects/', include('projects.urls')),  # Projects URLs
 ]
 
 # Serve media files in development

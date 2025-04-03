@@ -1,20 +1,22 @@
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from .forms import UserRegisterForm, UserUpdateForm, ProfileUpdateForm
-from django.contrib.auth.forms import AuthenticationForm
+from django.urls import reverse
+from django.contrib.auth import authenticate, login
+from .forms import UserRegisterForm, UserUpdateForm, ProfileUpdateForm, EmailAuthenticationForm
+from django.contrib.auth.models import User
 
 def register(request):
     if request.method == 'POST':
         form = UserRegisterForm(request.POST)
         if form.is_valid():
             form.save()
-            username = form.cleaned_data.get('username')
-            messages.success(request, f'Account created for {username}! You can now log in.')
+            email = form.cleaned_data.get('email')
+            messages.success(request, f'Account created for {email}! You can now log in.')
             return redirect('login')
     else:
         form = UserRegisterForm()
-    return render(request, 'users/auth.html', {'form': form})
+    return render(request, 'accounts/auth.html', {'form': form, 'active_tab': 'register'})
 
 def auth(request):
     """
@@ -23,7 +25,7 @@ def auth(request):
     (processing form submissions) for both login and registration.
     """
     # Initialize both forms
-    login_form = AuthenticationForm()
+    login_form = EmailAuthenticationForm()
     register_form = UserRegisterForm()
     
     # Determine which form was submitted based on a hidden input field
@@ -31,22 +33,24 @@ def auth(request):
         form_type = request.POST.get('form_type')
         
         if form_type == 'login':
-            login_form = AuthenticationForm(data=request.POST)
+            login_form = EmailAuthenticationForm(request, data=request.POST)
             if login_form.is_valid():
-                from django.contrib.auth import login
                 user = login_form.get_user()
                 login(request, user)
-                messages.success(request, f'Welcome back, {user.username}!')
-                # Redirect to the next parameter if provided, otherwise to home
-                next_url = request.GET.get('next', 'profile')
-                return redirect(next_url)
+                messages.success(request, f'Welcome back!')
+                
+                # Redirect to the chat page or next parameter if provided
+                next_url = request.GET.get('next')
+                if next_url:
+                    return redirect(next_url)
+                return redirect('/chat/')  # Direct URL is more reliable here
         
         elif form_type == 'register':
             register_form = UserRegisterForm(request.POST)
             if register_form.is_valid():
                 register_form.save()
-                username = register_form.cleaned_data.get('username')
-                messages.success(request, f'Account created for {username}! You can now log in.')
+                email = register_form.cleaned_data.get('email')
+                messages.success(request, f'Account created for {email}! You can now log in.')
                 return redirect('login')
     
     # Render the template with both forms
@@ -55,7 +59,7 @@ def auth(request):
         'register_form': register_form,
         'active_tab': 'login' if request.method == 'GET' or (request.method == 'POST' and request.POST.get('form_type') == 'login') else 'register'
     }
-    return render(request, 'users/auth.html', context)
+    return render(request, 'accounts/auth.html', context)
 
 @login_required
 def profile(request):
@@ -76,4 +80,4 @@ def profile(request):
         'u_form': u_form,
         'p_form': p_form
     }
-    return render(request, 'users/profile.html', context) 
+    return render(request, 'accounts/profile.html', context) 

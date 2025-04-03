@@ -5,13 +5,41 @@ document.addEventListener('DOMContentLoaded', () => {
     const messageContainer = document.querySelector('.message-container') || createMessageContainer();
     const conversationList = document.getElementById('conversation-list');
     const newChatBtn = document.getElementById('new-chat-btn');
+    const backBtn = document.getElementById('back-btn');
     const sidebar = document.getElementById('sidebar');
-    const toggleSidebarBtn = document.getElementById('toggle-sidebar-btn');
     const appContainer = document.querySelector('.app-container');
     const sidebarOverlay = document.getElementById('sidebar-overlay');
     
     let currentConversationId = null;
     let currentProvider = 'openai';
+    let currentProjectId = null;
+    let socket = null;
+    let isSocketConnected = false;
+    let messageQueue = [];
+    let isStreaming = false; // Track whether we're currently streaming a response
+    let stopRequested = false; // Track if user has already requested to stop generation
+    
+    // Get or create the send button
+    const sendBtn = document.getElementById('send-btn') || createSendButton();
+    let stopBtn = null; // Will be created when needed
+    
+    // Check for conversation ID in the URL or from Django template
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('conversation_id')) {
+        currentConversationId = urlParams.get('conversation_id');
+    } else if (typeof initialConversationId !== 'undefined' && initialConversationId) {
+        currentConversationId = initialConversationId;
+    }
+    
+    // Check for project ID
+    if (urlParams.has('project_id')) {
+        currentProjectId = urlParams.get('project_id');
+    } else if (typeof initialProjectId !== 'undefined' && initialProjectId) {
+        currentProjectId = initialProjectId;
+    }
+    
+    // Initialize WebSocket connection
+    connectWebSocket();
     
     // Auto-resize the text area based on content
     chatInput.addEventListener('input', function() {
@@ -35,6 +63,11 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Load conversation history on page load
     loadConversations();
+    
+    // If we have a conversation ID, load that conversation
+    if (currentConversationId) {
+        loadConversation(currentConversationId);
+    }
     
     // New chat button click handler
     newChatBtn.addEventListener('click', () => {
@@ -70,6 +103,247 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
     
+    // Back button click handler
+    if (backBtn) {
+        backBtn.addEventListener('click', () => {
+            window.location.href = '/projects/';
+        });
+    }
+    
+    // Window event listeners for WebSocket
+    window.addEventListener('beforeunload', () => {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.close();
+        }
+    });
+    
+    // Function to connect WebSocket
+    function connectWebSocket() {
+        // Determine if we're on HTTPS or HTTP
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/chat/`;
+        
+        // Add conversation ID as query parameter if available
+        const wsUrlWithParams = currentConversationId 
+            ? `${wsUrl}?conversation_id=${currentConversationId}`
+            : wsUrl;
+        
+        console.log('Connecting to WebSocket:', wsUrlWithParams);
+        
+        // Close existing socket if it exists
+        if (socket) {
+            socket.close();
+        }
+        
+        socket = new WebSocket(wsUrlWithParams);
+        
+        socket.onopen = function(e) {
+            console.log('WebSocket connection established');
+            isSocketConnected = true;
+            
+            // Send any queued messages
+            while (messageQueue.length > 0) {
+                const queuedMessage = messageQueue.shift();
+                socket.send(JSON.stringify(queuedMessage));
+            }
+        };
+        
+        socket.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            console.log('WebSocket message received:', data);
+            
+            // Log message content for troubleshooting empty messages
+            if (data.type === 'ai_chunk' && data.is_final) {
+                console.log('Final AI chunk received - conversation saved');
+            } else if (data.type === 'ai_chunk' && data.chunk === '') {
+                console.log('Empty AI chunk received - this may be a typing indicator');
+            } else if (data.type === 'message' && (!data.message || data.message.trim() === '')) {
+                console.warn('Empty message content received in message event:', data);
+            }
+            
+            switch (data.type) {
+                case 'chat_history':
+                    // Handle chat history
+                    clearChatMessages();
+                    data.messages.forEach(msg => {
+                        // Skip empty messages
+                        if (msg.content && msg.content.trim() !== '') {
+                            addMessageToChat(msg.role, msg.content);
+                        }
+                    });
+                    scrollToBottom();
+                    break;
+                    
+                case 'message':
+                    // Handle complete message
+                    addMessageToChat(data.sender, data.message);
+                    scrollToBottom();
+                    break;
+                    
+                case 'ai_chunk':
+                    // Handle AI response chunk for streaming
+                    // Skip entirely empty chunks that aren't typing indicators or final messages
+                    if (data.chunk === '' && !data.is_final && document.querySelector('.message.assistant:last-child')) {
+                        console.log('Skipping empty non-final chunk');
+                        break;
+                    }
+                    
+                    handleAIChunk(data);
+                    break;
+                
+                case 'stop_confirmed':
+                    // Handle confirmation that generation was stopped
+                    console.log('Generation stopped by server');
+                    
+                    // If the user has already processed the stop locally, don't do anything
+                    if (!stopRequested) {
+                        // Remove typing indicator if it exists
+                        const typingIndicator = document.querySelector('.typing-indicator');
+                        if (typingIndicator) {
+                            typingIndicator.remove();
+                        }
+                        
+                        // Check if there's an assistant message, if not add one
+                        const assistantMessage = document.querySelector('.message.assistant:last-child');
+                        if (!assistantMessage) {
+                            // No message was created yet, so create one with the stopped message
+                            addMessageToChat('system', '*Generation stopped by server*');
+                        }
+                        
+                        // Re-enable input and restore send button
+                        chatInput.disabled = false;
+                        hideStopButton();
+                    }
+                    
+                    // Reset the flag
+                    stopRequested = false;
+                    break;
+                    
+                case 'error':
+                    console.error('WebSocket error:', data.message);
+                    // Display error message to user
+                    const errorMsg = document.createElement('div');
+                    errorMsg.className = 'error-message';
+                    errorMsg.textContent = data.message;
+                    messageContainer.appendChild(errorMsg);
+                    scrollToBottom();
+                    
+                    // In case of error, restore UI
+                    chatInput.disabled = false;
+                    hideStopButton();
+                    break;
+                    
+                default:
+                    console.log('Unknown message type:', data.type);
+            }
+        };
+        
+        socket.onclose = function(event) {
+            if (event.wasClean) {
+                console.log(`WebSocket connection closed cleanly, code=${event.code}, reason=${event.reason}`);
+            } else {
+                console.error('WebSocket connection died');
+                
+                // Attempt to reconnect after a delay
+                setTimeout(() => {
+                    isSocketConnected = false;
+                    console.log('Attempting to reconnect...');
+                    connectWebSocket();
+                }, 3000);
+            }
+        };
+        
+        socket.onerror = function(error) {
+            console.error('WebSocket error:', error);
+            isSocketConnected = false;
+        };
+    }
+    
+    // Function to handle AI response chunks
+    function handleAIChunk(data) {
+        const chunk = data.chunk;
+        const isFinal = data.is_final;
+        
+        if (isFinal) {
+            // Final chunk with metadata
+            console.log('AI response complete');
+            
+            // Skip creating a message if it's empty (likely just the final signal after a stop)
+            if (chunk === '' && document.querySelector('.message.system:last-child')) {
+                console.log('Skipping empty final chunk after stopped generation');
+            }
+            
+            // Update conversation ID and other metadata if provided
+            if (data.conversation_id) {
+                currentConversationId = data.conversation_id;
+                
+                // Update URL with conversation ID
+                const url = new URL(window.location);
+                url.searchParams.set('conversation_id', currentConversationId);
+                window.history.pushState({}, '', url);
+            }
+            
+            if (data.provider) {
+                currentProvider = data.provider;
+            }
+            
+            if (data.project_id) {
+                currentProjectId = data.project_id;
+            }
+            
+            // Re-enable the input
+            chatInput.disabled = false;
+            chatInput.focus();
+            
+            // Restore send button
+            hideStopButton();
+            
+            // Reset the stop requested flag
+            stopRequested = false;
+            
+            // Reload the conversations list to include the new one
+            loadConversations();
+            return;
+        }
+        
+        if (!chunk) {
+            // This is just a typing indicator
+            const typingIndicator = document.querySelector('.typing-indicator');
+            if (!typingIndicator) {
+                const indicator = document.createElement('div');
+                indicator.className = 'typing-indicator';
+                indicator.innerHTML = '<span></span><span></span><span></span>';
+                messageContainer.appendChild(indicator);
+                scrollToBottom();
+            }
+            return;
+        }
+        
+        // Get or create the assistant message
+        const assistantMessage = document.querySelector('.message.assistant:last-child');
+        if (assistantMessage) {
+            // Add to existing message
+            const existingContent = assistantMessage.querySelector('.message-content');
+            const currentContent = existingContent.getAttribute('data-raw-content') || '';
+            const newContent = currentContent + chunk;
+            
+            // Store raw content and render with markdown
+            existingContent.setAttribute('data-raw-content', newContent);
+            existingContent.innerHTML = marked.parse(newContent);
+        } else {
+            // Remove typing indicator if present
+            const typingIndicator = document.querySelector('.typing-indicator');
+            if (typingIndicator) {
+                typingIndicator.remove();
+            }
+            
+            // Create new message
+            addMessageToChat('assistant', chunk);
+        }
+        
+        scrollToBottom();
+    }
+    
     // Function to create message container if it doesn't exist
     function createMessageContainer() {
         const container = document.createElement('div');
@@ -78,9 +352,96 @@ document.addEventListener('DOMContentLoaded', () => {
         return container;
     }
     
-    // Function to send message and get response
-    async function sendMessage(message) {
+    // Function to create send button if it doesn't exist
+    function createSendButton() {
+        const btn = document.createElement('button');
+        btn.id = 'send-btn';
+        btn.type = 'submit';
+        btn.className = 'send-btn';
+        btn.innerHTML = '<i class="fas fa-paper-plane"></i>';
+        btn.title = 'Send message';
+        chatForm.appendChild(btn);
+        return btn;
+    }
+    
+    // Function to create and show stop button
+    function showStopButton() {
+        // Create stop button if it doesn't exist
+        if (!stopBtn) {
+            stopBtn = document.createElement('button');
+            stopBtn.id = 'stop-btn';
+            stopBtn.type = 'button';
+            stopBtn.className = 'stop-btn';
+            stopBtn.innerHTML = '<i class="fas fa-stop"></i>';
+            stopBtn.title = 'Stop generating';
+            
+            // Add event listener to stop button
+            stopBtn.addEventListener('click', stopGeneration);
+            
+            // Insert after (or in place of) the send button
+            chatForm.appendChild(stopBtn);
+        }
+        
+        // Show stop button, hide send button
+        sendBtn.style.display = 'none';
+        stopBtn.style.display = 'block';
+        isStreaming = true;
+    }
+    
+    // Function to hide stop button and show send button
+    function hideStopButton() {
+        if (stopBtn) {
+            stopBtn.style.display = 'none';
+        }
+        sendBtn.style.display = 'block';
+        isStreaming = false;
+    }
+    
+    // Function to stop the generation
+    function stopGeneration() {
+        if (socket && socket.readyState === WebSocket.OPEN && !stopRequested) {
+            // Set flag to indicate stop has been requested
+            stopRequested = true;
+            
+            const stopMessage = {
+                type: 'stop_generation',
+                conversation_id: currentConversationId
+            };
+            socket.send(JSON.stringify(stopMessage));
+            console.log('Stop generation message sent');
+            
+            // Remove typing indicator if it exists
+            const typingIndicator = document.querySelector('.typing-indicator');
+            if (typingIndicator) {
+                typingIndicator.remove();
+            }
+            
+            // Add a note that generation was stopped
+            const assistantMessage = document.querySelector('.message.assistant:last-child');
+            if (assistantMessage) {
+                const contentDiv = assistantMessage.querySelector('.message-content');
+                const currentContent = contentDiv.getAttribute('data-raw-content') || '';
+                const newContent = currentContent + '\n\n*Generation stopped by user*';
+                
+                contentDiv.setAttribute('data-raw-content', newContent);
+                contentDiv.innerHTML = marked.parse(newContent);
+            } else {
+                // If there's no assistant message yet, create one with the stopped message
+                addMessageToChat('system', '*Generation stopped by user*');
+            }
+            
+            // Reset UI - enable input and restore send button
+            chatInput.disabled = false;
+            hideStopButton();
+        }
+    }
+    
+    // Function to send message using WebSocket
+    function sendMessage(message) {
         console.log('sendMessage: Starting to send message:', message);
+        
+        // Reset stop requested flag
+        stopRequested = false;
         
         // Add user message to chat
         addMessageToChat('user', message);
@@ -95,247 +456,127 @@ document.addEventListener('DOMContentLoaded', () => {
         // Scroll to bottom
         scrollToBottom();
         
-        // Test artifact functionality
-        if (message.toLowerCase().includes('show artifact')) {
-            console.log('sendMessage: Show artifact command detected');
-            // Add a test artifact
-            if (window.ArtifactsPanel) {
-                setTimeout(() => {
-                    console.log('sendMessage: Adding test artifact to panel');
-                    window.ArtifactsPanel.addArtifact({
-                        title: "Test Artifact",
-                        description: "This is a test artifact created from your message",
-                        type: "code",
-                        content: "function testArtifact() {\n  console.log('This is a test artifact');\n  return 'Hello from the artifacts panel!';\n}"
-                    });
-                }, 1000);
-            }
+        // Disable input while waiting for response
+        chatInput.disabled = true;
+        
+        // Show stop button since we're about to start streaming
+        showStopButton();
+        
+        // Prepare message data
+        const messageData = {
+            type: 'message',
+            message: message,
+            conversation_id: currentConversationId,
+            provider: currentProvider
+        };
+        
+        // Add project_id if available
+        if (currentProjectId) {
+            messageData.project_id = currentProjectId;
         }
         
-        let fullResponse = '';
-        let controller = new AbortController();
+        console.log('sendMessage: Message data:', messageData);
         
-        try {
-            console.log('sendMessage: Disabling input while waiting for response');
-            // Disable input while waiting for response
-            chatInput.disabled = true;
+        // Send via WebSocket if connected, otherwise queue
+        if (isSocketConnected && socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify(messageData));
+        } else {
+            console.log('WebSocket not connected, queueing message');
+            messageQueue.push(messageData);
             
-            // Prepare request data
-            const data = {
-                message: message,
-                conversation_id: currentConversationId,
-                provider: currentProvider
-            };
-            
-            console.log('sendMessage: Request data:', data);
-            
-            // Get CSRF token
-            const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
-            
-            console.log('sendMessage: Sending request to server');
-            
-            // Send request to server
-            const response = await fetch('/api/chat/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': csrfToken,
-                    'Accept': 'text/event-stream'
-                },
-                body: JSON.stringify(data),
-                signal: controller.signal
-            });
-            
-            // Remove typing indicator
-            typingIndicator.remove();
-            console.log('sendMessage: Removed typing indicator');
-            
-            if (!response.ok) {
-                console.error('sendMessage: Server returned error:', response.status);
-                throw new Error(`Server returned ${response.status}`);
+            // Try to reconnect
+            if (!isSocketConnected) {
+                connectWebSocket();
             }
-            
-            console.log('sendMessage: Processing streaming response');
-            
-            // Process the streaming response
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            
-            while (true) {
-                const { value, done } = await reader.read();
-                
-                if (done) {
-                    console.log('sendMessage: Stream complete');
-                    break;
-                }
-                
-                // Decode the chunk and add it to our buffer
-                buffer += decoder.decode(value, { stream: true });
-                
-                // Process complete SSE messages in the buffer
-                let lines = buffer.split('\n\n');
-                buffer = lines.pop() || ''; // Keep the last incomplete chunk in the buffer
-                
-                for (const line of lines) {
-                    if (line.trim() === '') continue;
-                    
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const eventData = line.substring(6); // Remove 'data: ' prefix
-                            const data = JSON.parse(eventData);
-                            console.log('sendMessage: Received chunk:', data);
-                            
-                            if (data.content) {
-                                fullResponse += data.content;
-                                
-                                // Update the message in real-time
-                                const assistantMessage = document.querySelector('.message.assistant:last-child');
-                                if (assistantMessage) {
-                                    assistantMessage.querySelector('.message-content').innerHTML = marked.parse(fullResponse);
-                                } else {
-                                    addMessageToChat('assistant', fullResponse);
-                                }
-                                scrollToBottom();
-                            }
-                            
-                            if (data.done) {
-                                console.log('sendMessage: Received done signal');
-                                
-                                // Update conversation ID if this is a new conversation
-                                if (!currentConversationId && data.conversation_id) {
-                                    currentConversationId = data.conversation_id;
-                                    console.log('sendMessage: New conversation created with ID:', currentConversationId);
-                                    // Add the new conversation to the list
-                                    addConversationToList(data.conversation_id, message);
-                                }
-                                
-                                // Check if there are any artifacts in the response
-                                if (data.artifacts && data.artifacts.length > 0) {
-                                    console.log('sendMessage: Received artifacts:', data.artifacts.length);
-                                    // Add each artifact to the panel
-                                    data.artifacts.forEach(artifact => {
-                                        // Check if ArtifactsPanel exists
-                                        if (window.ArtifactsPanel) {
-                                            console.log('sendMessage: Adding artifact to panel:', artifact.title);
-                                            window.ArtifactsPanel.addArtifact(artifact);
-                                        }
-                                    });
-                                }
-                            }
-                        } catch (error) {
-                            console.error('sendMessage: Error parsing event data:', error, line);
-                        }
-                    }
-                }
-            }
-            
-            // Example of manually adding an artifact (for demonstration)
-            if (message.toLowerCase().includes('example') || message.toLowerCase().includes('artifact')) {
-                console.log('sendMessage: Example/artifact keyword detected, adding example artifact');
-                // Check if ArtifactsPanel exists
-                if (window.ArtifactsPanel) {
-                    window.ArtifactsPanel.addArtifact({
-                        title: "Example Artifact",
-                        description: "This is an example artifact created from your message",
-                        type: "code",
-                        content: "function exampleCode() {\n  console.log('This is an example artifact');\n  return 'Hello from the artifacts panel!';\n}"
-                    });
-                }
-            }
-            
-        } catch (error) {
-            console.error('sendMessage: Error in sendMessage:', error);
-            
-            // Remove typing indicator if it still exists
-            if (typingIndicator.parentNode) {
-                typingIndicator.remove();
-            }
-            
-            // Add error message if we haven't received any response yet
-            if (!fullResponse) {
-                addMessageToChat('assistant', 'Sorry, I encountered an error processing your request.');
-            }
-            
-            // Abort any ongoing fetch
-            controller.abort();
-            
-        } finally {
-            console.log('sendMessage: Re-enabling input and focusing');
-            // Re-enable input
-            chatInput.disabled = false;
-            chatInput.focus();
-            
-            // Scroll to bottom
-            scrollToBottom();
-            console.log('sendMessage: Function completed');
         }
     }
     
     // Function to add a message to the chat
     function addMessageToChat(role, content) {
-        // Remove welcome message if it exists
-        const welcomeMessage = document.querySelector('.welcome-message');
-        if (welcomeMessage) {
-            welcomeMessage.remove();
+        // Skip adding empty messages
+        if (!content || content.trim() === '') {
+            console.log(`Skipping empty ${role} message`);
+            return;
         }
         
+        // Create message element
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${role}`;
         
+        // Create message content
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
+        contentDiv.setAttribute('data-raw-content', content);
         
-        if (role === 'assistant') {
+        // Use marked.js to render markdown for assistant messages
+        if (role === 'assistant' || role === 'system') {
             contentDiv.innerHTML = marked.parse(content);
         } else {
+            // For user messages, just escape HTML and replace newlines with <br>
             contentDiv.textContent = content;
         }
         
+        // Append elements
         messageDiv.appendChild(contentDiv);
         messageContainer.appendChild(messageDiv);
-        scrollToBottom();
+        
+        // Remove typing indicator if it exists
+        const typingIndicator = document.querySelector('.typing-indicator');
+        if (typingIndicator) {
+            typingIndicator.remove();
+        }
     }
     
-    // Function to clear chat messages
+    // Function to clear all messages from the chat
     function clearChatMessages() {
-        messageContainer.innerHTML = `
-            <div class="welcome-message">
-                <h2>Welcome to LFG Chat</h2>
-                <p>Start a conversation with the AI assistant below.</p>
-            </div>
-        `;
+        messageContainer.innerHTML = '';
     }
     
-    // Function to scroll chat to bottom
+    // Function to scroll to the bottom of the chat
     function scrollToBottom() {
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
     
-    // Function to load conversations
+    // Function to load conversation list
     async function loadConversations() {
         try {
             const response = await fetch('/api/conversations/');
             const conversations = await response.json();
             
+            // Clear the conversation list
             conversationList.innerHTML = '';
             
+            // Add conversations to the list
             conversations.forEach(conversation => {
-                const conversationItem = document.createElement('div');
-                conversationItem.className = 'conversation-item';
-                if (currentConversationId === conversation.id) {
+                const conversationItem = createCompactConversationItem(conversation);
+                
+                // Add active class if this is the current conversation
+                if (conversation.id === currentConversationId) {
                     conversationItem.classList.add('active');
                 }
                 
-                conversationItem.textContent = conversation.title;
-                conversationItem.dataset.id = conversation.id;
-                
+                // Add click handler
                 conversationItem.addEventListener('click', () => {
                     loadConversation(conversation.id);
                 });
                 
+                // Add delete handler
+                const deleteBtn = conversationItem.querySelector('.delete-conversation-btn');
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    deleteConversation(conversation.id);
+                });
+                
                 conversationList.appendChild(conversationItem);
             });
+            
+            // If sidebar is empty, add a message
+            if (conversations.length === 0) {
+                const emptyMessage = document.createElement('div');
+                emptyMessage.className = 'empty-conversations-message';
+                emptyMessage.textContent = 'No conversations yet. Start chatting!';
+                conversationList.appendChild(emptyMessage);
+            }
         } catch (error) {
             console.error('Error loading conversations:', error);
         }
@@ -345,25 +586,42 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadConversation(conversationId) {
         try {
             const response = await fetch(`/api/conversations/${conversationId}/`);
-            const conversation = await response.json();
+            const data = await response.json();
             
-            currentConversationId = conversation.id;
+            // Set current conversation ID
+            currentConversationId = conversationId;
             
-            // Update active state in conversation list
-            document.querySelectorAll('.conversation-item').forEach(item => {
-                item.classList.remove('active');
-                if (parseInt(item.dataset.id) === conversation.id) {
-                    item.classList.add('active');
+            // Clear chat
+            clearChatMessages();
+            
+            // Set project ID if this conversation is linked to a project
+            if (data.project) {
+                currentProjectId = data.project.id;
+            }
+            
+            // Add each message to the chat
+            data.messages.forEach(message => {
+                // Skip empty messages and show all non-empty messages
+                if (message.content && message.content.trim() !== '') {
+                    addMessageToChat(message.role, message.content);
                 }
             });
             
-            // Clear and load messages
-            messageContainer.innerHTML = '';
-            
-            conversation.messages.forEach(message => {
-                addMessageToChat(message.role, message.content);
+            // Mark this conversation as active in the sidebar
+            document.querySelectorAll('.conversation-item').forEach(item => {
+                if (item.dataset.id === conversationId) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
             });
             
+            // Update URL with conversation ID
+            const url = new URL(window.location);
+            url.searchParams.set('conversation_id', conversationId);
+            window.history.pushState({}, '', url);
+            
+            // Scroll to bottom
             scrollToBottom();
         } catch (error) {
             console.error('Error loading conversation:', error);
@@ -394,28 +652,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Toggle sidebar when button is clicked
-    toggleSidebarBtn.addEventListener('click', () => {
-        const isCurrentlyCollapsed = appContainer.classList.contains('sidebar-collapsed');
-        setSidebarState(!isCurrentlyCollapsed);
-    });
-
     // Close sidebar when overlay is clicked (mobile)
     sidebarOverlay.addEventListener('click', () => {
         appContainer.classList.remove('sidebar-open');
     });
-
-    // Initialize sidebar state from user preference
-    function initSidebarState() {
-        // Check if we have a server-provided preference
-        const serverPreference = document.body.dataset.sidebarCollapsed === 'true';
-        
-        // If not, fall back to localStorage
-        const localPreference = localStorage.getItem('sidebar_collapsed') === 'true';
-        
-        // Apply the preference
-        setSidebarState(serverPreference || localPreference);
-    }
 
     // Add a mobile toggle button
     function addMobileToggle() {
@@ -429,7 +669,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Call the initialization functions
-    initSidebarState();
     if (window.innerWidth <= 768) {
         addMobileToggle();
     }
@@ -439,79 +678,76 @@ document.addEventListener('DOMContentLoaded', () => {
         return document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
     }
 
-    // Function to add a conversation to the list
-    function addConversationToList(conversationId, title) {
-        // Check if conversation already exists in the list
-        const existingConversation = document.querySelector(`.conversation-item[data-id="${conversationId}"]`);
-        if (existingConversation) {
-            // If it exists, just make it active
-            document.querySelectorAll('.conversation-item').forEach(item => {
-                item.classList.remove('active');
-            });
-            existingConversation.classList.add('active');
+    // Function to delete a conversation
+    async function deleteConversation(conversationId) {
+        if (!confirm('Are you sure you want to delete this conversation? This action cannot be undone.')) {
             return;
         }
         
-        // Create a new conversation item
+        try {
+            // Get CSRF token
+            const csrfToken = getCsrfToken();
+            
+            // Send delete request
+            const response = await fetch(`/api/conversations/${conversationId}/`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Server returned ${response.status}`);
+            }
+            
+            // Remove from DOM
+            const conversationItem = document.querySelector(`.conversation-item[data-id="${conversationId}"]`);
+            if (conversationItem) {
+                conversationItem.remove();
+            }
+            
+            // If this was the active conversation, clear the chat
+            if (currentConversationId === conversationId) {
+                currentConversationId = null;
+                clearChatMessages();
+                chatInput.focus();
+                
+                // Clear URL parameter
+                const url = new URL(window.location);
+                url.searchParams.delete('conversation_id');
+                window.history.pushState({}, '', url);
+            }
+            
+            // Refresh conversation list
+            loadConversations();
+            
+        } catch (error) {
+            console.error('Error deleting conversation:', error);
+            alert('Failed to delete conversation. Please try again.');
+        }
+    }
+
+    // Modify the function that creates conversation items to be even more compact
+    function createCompactConversationItem(conversation) {
         const conversationItem = document.createElement('div');
-        conversationItem.className = 'conversation-item active';
-        conversationItem.setAttribute('data-id', conversationId);
+        conversationItem.className = 'conversation-item';
+        conversationItem.dataset.id = conversation.id;
         
-        // Truncate title if it's too long
-        const truncatedTitle = title.length > 30 ? title.substring(0, 27) + '...' : title;
+        // Truncate title to be compact
+        let title = conversation.title || `Chat ${conversation.id}`;
+        if (title.length > 20) { // Allow slightly longer titles since we don't show project badges
+            title = title.substring(0, 20) + '...';
+        }
         
+        // Create minimal HTML structure without project badges
         conversationItem.innerHTML = `
-            <div class="conversation-title">${truncatedTitle}</div>
-            <div class="conversation-actions">
-                <button class="delete-conversation" data-id="${conversationId}">
-                    <i class="fas fa-trash"></i>
-                </button>
-            </div>
+            <div class="conversation-title" title="${conversation.title}">${title}</div>
+            <button class="delete-conversation-btn" title="Delete">
+                <i class="fas fa-times"></i>
+            </button>
         `;
         
-        // Add click event to load the conversation
-        conversationItem.addEventListener('click', (e) => {
-            // Ignore if delete button was clicked
-            if (e.target.closest('.delete-conversation')) return;
-            
-            // Remove active class from all conversations
-            document.querySelectorAll('.conversation-item').forEach(item => {
-                item.classList.remove('active');
-            });
-            
-            // Add active class to this conversation
-            conversationItem.classList.add('active');
-            
-            // Load the conversation
-            loadConversation(conversationId);
-        });
-        
-        // Add delete button functionality
-        const deleteBtn = conversationItem.querySelector('.delete-conversation');
-        if (deleteBtn) {
-            deleteBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                deleteConversation(conversationId);
-            });
-        }
-        
-        // Add to the beginning of the list
-        if (conversationList.firstChild) {
-            conversationList.insertBefore(conversationItem, conversationList.firstChild);
-        } else {
-            conversationList.appendChild(conversationItem);
-        }
-        
-        // Remove active class from all other conversations
-        document.querySelectorAll('.conversation-item').forEach(item => {
-            if (item !== conversationItem) {
-                item.classList.remove('active');
-            }
-        });
+        return conversationItem;
     }
-    
-    // Function to delete a conversation
-    function deleteConversation(conversationId) {
-        // Implementation for deleteConversation would go here
-    }
-}); 
+});
