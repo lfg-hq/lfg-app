@@ -23,6 +23,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const sendBtn = document.getElementById('send-btn') || createSendButton();
     let stopBtn = null; // Will be created when needed
     
+    // Extract project ID from path if in format /chat/project/{id}/
+    function extractProjectIdFromPath() {
+        const pathParts = window.location.pathname.split('/').filter(part => part);
+        if (pathParts.length >= 3 && pathParts[0] === 'chat' && pathParts[1] === 'project') {
+            return pathParts[2];
+        }
+        return null;
+    }
+    
     // Check for conversation ID in the URL or from Django template
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.has('conversation_id')) {
@@ -31,11 +40,18 @@ document.addEventListener('DOMContentLoaded', () => {
         currentConversationId = initialConversationId;
     }
     
-    // Check for project ID
+    // Check for project ID from different sources
     if (urlParams.has('project_id')) {
         currentProjectId = urlParams.get('project_id');
     } else if (typeof initialProjectId !== 'undefined' && initialProjectId) {
         currentProjectId = initialProjectId;
+    } else {
+        // Try to extract from path
+        const pathProjectId = extractProjectIdFromPath();
+        if (pathProjectId) {
+            currentProjectId = pathProjectId;
+            console.log('Extracted project ID from path:', currentProjectId);
+        }
     }
     
     // Initialize WebSocket connection
@@ -71,14 +87,61 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // New chat button click handler
     newChatBtn.addEventListener('click', () => {
+        // Reset conversation ID but keep project ID if it's from URL
         currentConversationId = null;
-        clearChatMessages();
-        chatInput.focus();
         
-        // Remove active class from all conversations
+        // Check if we should maintain the project ID
+        const urlParams = new URLSearchParams(window.location.search);
+        console.log('Url Params:', urlParams);
+        const urlProjectId = urlParams.get('project_id');
+        const pathProjectId = extractProjectIdFromPath();
+        
+        // Only reset project ID if it's not specified in URL or path
+        if (!urlProjectId && !pathProjectId) {
+            currentProjectId = null;
+        } else if (pathProjectId && !currentProjectId) {
+            // Update currentProjectId if it was found in the path but wasn't set
+            currentProjectId = pathProjectId;
+        }
+        
+        // Clear chat messages and show welcome message
+        clearChatMessages();
+        
+        // Add welcome message
+        const welcomeMessage = document.createElement('div');
+        welcomeMessage.className = 'welcome-message';
+        welcomeMessage.innerHTML = '<h2>LFG 🚀🚀</h2><p>Start a conversation with the AI assistant below.</p>';
+        messageContainer.appendChild(welcomeMessage);
+        
+        // Reset WebSocket connection to ensure clean session
+        connectWebSocket();
+        
+        // Update URL handling
+        if (pathProjectId) {
+            // If we're in path format, keep the same URL format but remove conversation_id param
+            const url = new URL(window.location);
+            url.searchParams.delete('conversation_id');
+            window.history.pushState({}, '', url);
+        } else {
+            // Normal handling for query param style URLs
+            const url = new URL(window.location);
+            url.searchParams.delete('conversation_id');
+            // Only remove project_id from URL if it's not specified
+            if (!urlProjectId) {
+                url.searchParams.delete('project_id');
+            }
+            window.history.pushState({}, '', url);
+        }
+        
+        // Remove active class from all conversations in sidebar
         document.querySelectorAll('.conversation-item').forEach(item => {
             item.classList.remove('active');
         });
+        
+        // Focus on input for immediate typing
+        chatInput.focus();
+        
+        console.log('New chat session started with project ID:', currentProjectId);
     });
     
     // Submit message when form is submitted
@@ -117,16 +180,41 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
-    // Function to connect WebSocket
+    // Function to connect WebSocket and receive messages
     function connectWebSocket() {
         // Determine if we're on HTTPS or HTTP
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws/chat/`;
+
+        console.log('Current Project ID:', currentProjectId);
+        console.log('URL path:', window.location.pathname);
+        console.log('URL params:', window.location.search);
         
-        // Add conversation ID as query parameter if available
-        const wsUrlWithParams = currentConversationId 
-            ? `${wsUrl}?conversation_id=${currentConversationId}`
-            : wsUrl;
+        // Add conversation ID and project ID as query parameters if available
+        let wsUrlWithParams = wsUrl;
+        const urlParams = [];
+        
+        if (currentConversationId) {
+            urlParams.push(`conversation_id=${currentConversationId}`);
+        }
+        
+        if (currentProjectId) {
+            urlParams.push(`project_id=${currentProjectId}`);
+            console.log('Adding project_id to WebSocket URL:', currentProjectId);
+        } else {
+            console.warn('No project_id available for WebSocket connection!');
+            // Try once more to get project ID from path as a fallback
+            const pathProjectId = extractProjectIdFromPath();
+            if (pathProjectId) {
+                currentProjectId = pathProjectId;
+                urlParams.push(`project_id=${currentProjectId}`);
+                console.log('Found and added project_id from path:', currentProjectId);
+            }
+        }
+        
+        if (urlParams.length > 0) {
+            wsUrlWithParams = `${wsUrl}?${urlParams.join('&')}`;
+        }
         
         console.log('Connecting to WebSocket:', wsUrlWithParams);
         
@@ -263,6 +351,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function handleAIChunk(data) {
         const chunk = data.chunk;
         const isFinal = data.is_final;
+        const isNotification = data.is_notification;
         
         if (isFinal) {
             // Final chunk with metadata
@@ -303,6 +392,35 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Reload the conversations list to include the new one
             loadConversations();
+            return;
+        }
+        
+        // Handle notifications
+        if (isNotification) {
+            console.log('Received notification:', data);
+            
+            // Make sure artifacts panel is visible
+            if (window.ArtifactsPanel && typeof window.ArtifactsPanel.toggle === 'function') {
+                window.ArtifactsPanel.toggle();
+            }
+            
+            // Switch to the appropriate tab
+            if (window.switchTab && data.notification_type) {
+                window.switchTab(data.notification_type);
+                
+                // Load the content for that tab if we have a project ID
+                if (currentProjectId) {
+                    if (data.notification_type === 'features' && 
+                        window.ArtifactsLoader && 
+                        typeof window.ArtifactsLoader.loadFeatures === 'function') {
+                        window.ArtifactsLoader.loadFeatures(currentProjectId);
+                    } else if (data.notification_type === 'personas' && 
+                              window.ArtifactsLoader && 
+                              typeof window.ArtifactsLoader.loadPersonas === 'function') {
+                        window.ArtifactsLoader.loadPersonas(currentProjectId);
+                    }
+                }
+            }
             return;
         }
         
@@ -405,7 +523,8 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const stopMessage = {
                 type: 'stop_generation',
-                conversation_id: currentConversationId
+                conversation_id: currentConversationId,
+                project_id: currentProjectId
             };
             socket.send(JSON.stringify(stopMessage));
             console.log('Stop generation message sent');
@@ -467,7 +586,8 @@ document.addEventListener('DOMContentLoaded', () => {
             type: 'message',
             message: message,
             conversation_id: currentConversationId,
-            provider: currentProvider
+            provider: currentProvider,
+            project_id: currentProjectId
         };
         
         // Add project_id if available
@@ -540,7 +660,18 @@ document.addEventListener('DOMContentLoaded', () => {
     // Function to load conversation list
     async function loadConversations() {
         try {
-            const response = await fetch('/api/conversations/');
+            // First check path for project ID since we're in project context
+            const pathProjectId = extractProjectIdFromPath();
+            
+            if (!pathProjectId) {
+                throw new Error('No project ID found in path. Expected format: /chat/project/{id}/');
+            }
+            
+            // Build the URL with project_id
+            const url = `/api/projects/${pathProjectId}/conversations/`;
+            console.log('Loading conversations for project:', pathProjectId);
+            
+            const response = await fetch(url);
             const conversations = await response.json();
             
             // Clear the conversation list
@@ -616,10 +747,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
             
-            // Update URL with conversation ID
-            const url = new URL(window.location);
-            url.searchParams.set('conversation_id', conversationId);
-            window.history.pushState({}, '', url);
+            // Check if we're in project path format
+            const pathProjectId = extractProjectIdFromPath();
+            
+            // Update URL appropriately based on format
+            if (pathProjectId) {
+                // If we're already in path format, just add conversation_id as query param
+                const url = new URL(window.location);
+                url.searchParams.set('conversation_id', conversationId);
+                window.history.pushState({}, '', url);
+            } else {
+                // Standard query param format
+                const url = new URL(window.location);
+                url.searchParams.set('conversation_id', conversationId);
+                if (currentProjectId) {
+                    url.searchParams.set('project_id', currentProjectId);
+                }
+                window.history.pushState({}, '', url);
+            }
             
             // Scroll to bottom
             scrollToBottom();
@@ -630,13 +775,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Function to set sidebar state
     function setSidebarState(collapsed) {
+        const sidebar = document.getElementById('sidebar');
+        
         if (collapsed) {
-            appContainer.classList.add('sidebar-collapsed');
+            sidebar.classList.remove('expanded');
+            appContainer.classList.remove('sidebar-expanded');
         } else {
-            appContainer.classList.remove('sidebar-collapsed');
+            sidebar.classList.add('expanded');
+            appContainer.classList.add('sidebar-expanded');
         }
         
-        // Store in localStorage as a fallback
+        // Store in localStorage
         localStorage.setItem('sidebar_collapsed', collapsed);
         
         // Save to server if user is logged in
@@ -654,7 +803,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Close sidebar when overlay is clicked (mobile)
     sidebarOverlay.addEventListener('click', () => {
-        appContainer.classList.remove('sidebar-open');
+        setSidebarState(true); // Collapse sidebar
     });
 
     // Add a mobile toggle button
@@ -663,7 +812,9 @@ document.addEventListener('DOMContentLoaded', () => {
         mobileToggle.className = 'mobile-sidebar-toggle';
         mobileToggle.innerHTML = '☰';
         mobileToggle.addEventListener('click', () => {
-            appContainer.classList.toggle('sidebar-open');
+            const sidebar = document.getElementById('sidebar');
+            const isCurrentlyExpanded = sidebar.classList.contains('expanded');
+            setSidebarState(isCurrentlyExpanded); // Toggle sidebar state
         });
         document.body.appendChild(mobileToggle);
     }

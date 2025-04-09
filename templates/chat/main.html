@@ -69,34 +69,9 @@
                 </form>
             </div>
         </div>
-
-        <!-- Artifacts Panel -->
-        <div class="artifacts-container" id="artifacts-panel">
-            <div class="resize-handle" id="resize-handle"></div>
-            
-            <button class="artifacts-toggle" id="artifacts-toggle">
-                <i class="fas fa-chevron-left"></i>
-            </button>
-            
-            <div class="artifacts-header">
-                <h2>Artifacts</h2>
-            </div>
-            
-            <div class="artifacts-content">
-                <!-- Empty state (shown when no artifacts) -->
-                <div class="empty-state">
-                    <div class="empty-state-icon">
-                        <i class="fas fa-box-open"></i>
-                    </div>
-                    <div class="empty-state-text">
-                        No artifacts available yet. Artifacts will appear here as they are generated.
-                    </div>
-                </div>
-                
-                <!-- Artifacts will be added here dynamically -->
-            </div>
-        </div>
     </div>
+
+    {% include 'chat/artifacts.html' %}
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     
@@ -104,6 +79,7 @@
     <script src="/static/js/chat.js"></script>
     <script src="/static/js/sidebar.js"></script>
     <script src="/static/js/artifacts.js"></script>
+    <script src="/static/js/artifacts-loader.js"></script>
     {% csrf_token %}
 </body>
 </html> 

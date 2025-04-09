@@ -8,8 +8,7 @@ from django.conf import settings
 # These imports are safe now because django.setup() is called in asgi.py before imports
 from django.contrib.auth.models import User
 from chat.models import Conversation, Message
-from chat.utils.ai_providers import AIProvider
-
+from chat.utils import AIProvider, get_system_prompt
 
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -106,14 +105,23 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 user_message = text_data_json.get('message', '')
                 conversation_id = text_data_json.get('conversation_id')
                 project_id = text_data_json.get('project_id')
-                provider_name = text_data_json.get('provider', settings.AI_PROVIDER_DEFAULT)
                 
                 # Get or create conversation
                 if conversation_id and not self.conversation:
                     self.conversation = await self.get_conversation(conversation_id)
                 
                 if not self.conversation:
-                    self.conversation = await self.create_conversation(user_message[:50])
+                    # Require a project_id to create a conversation
+                    if not project_id:
+                        await self.send_error("A project ID is required to create a conversation")
+                        return
+                    
+                    self.conversation = await self.create_conversation(user_message[:50], project_id)
+                    
+                    # Check if conversation was created
+                    if not self.conversation:
+                        await self.send_error("Failed to create conversation. Please check your project ID.")
+                        return
                 
                 # Save user message
                 await self.save_message('user', user_message)
@@ -121,6 +129,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 # Reset stop flag
                 self.should_stop_generation = False
                 
+                provider_name = settings.AI_PROVIDER_DEFAULT
                 # Generate AI response in background task
                 # Store the task so we can cancel it if needed
                 self.active_generation_task = asyncio.create_task(
@@ -170,14 +179,22 @@ class ChatConsumer(AsyncWebsocketConsumer):
         """
         Send AI response chunk to WebSocket
         """
-        await self.send(text_data=json.dumps({
+        # Create response data with all available properties
+        response_data = {
             'type': 'ai_chunk',
             'chunk': event['chunk'],
             'is_final': event['is_final'],
             'conversation_id': event.get('conversation_id'),
             'provider': event.get('provider'),
             'project_id': event.get('project_id')
-        }))
+        }
+        
+        # Add notification data if present
+        if event.get('is_notification'):
+            response_data['is_notification'] = True
+            response_data['notification_type'] = event.get('notification_type', 'features')
+        
+        await self.send(text_data=json.dumps(response_data))
     
     async def generate_ai_response(self, user_message, provider_name, project_id=None):
         """
@@ -210,7 +227,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         if not any(msg["role"] == "system" for msg in messages):
             messages.insert(0, {
                 "role": "system",
-                "content": await self.get_system_prompt()
+                "content": await get_system_prompt()
             })
         
         # Get the appropriate AI provider
@@ -221,7 +238,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             full_response = ""
             
             # Process the stream in an async context
-            async for content in self.process_ai_stream(provider, messages):
+            async for content in self.process_ai_stream(provider, messages, project_id):
                 # Check if generation should stop
                 if self.should_stop_generation:
                     # Add a note to the response that generation was stopped
@@ -283,7 +300,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             
             # Update conversation title if it's new
             if self.conversation and (not self.conversation.title or self.conversation.title == str(self.conversation.id)):
-                await self.update_conversation_title(user_message[:50])
+                # Use AI to generate a title based on first messages
+                await self.generate_title_with_ai(user_message, full_response)
             
             # Get project_id if conversation is linked to a project
             if not project_id and self.conversation:
@@ -371,7 +389,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             # Clear the active task reference
             self.active_generation_task = None
     
-    async def process_ai_stream(self, provider, messages):
+    async def process_ai_stream(self, provider, messages, project_id):
         """
         Process the AI provider's stream in an async-friendly way
         
@@ -387,7 +405,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 result = []
                 # We'll capture all chunks in one go, as the actual AI providers may not
                 # support cancellation mid-stream
-                for content in provider.generate_stream(messages):
+                for content in provider.generate_stream(messages, project_id):
                     result.append(content)
                     # We yield by appending to a result list, then returning it
                     # This approach avoids having to convert a generator to an async generator
@@ -407,6 +425,37 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     # the delivery of chunks to the client
                     break
                 
+                # Check if this is a notification JSON
+                if isinstance(chunk, str) and chunk.startswith('{') and chunk.endswith('}'):
+                    try:
+                        notification_data = json.loads(chunk)
+                        if 'is_notification' in notification_data and notification_data['is_notification']:
+                            # This is a notification - send it as a special message
+                            if hasattr(self, 'using_groups') and self.using_groups:
+                                await self.channel_layer.group_send(
+                                    self.room_group_name,
+                                    {
+                                        'type': 'ai_response_chunk',
+                                        'chunk': '',  # No visible content
+                                        'is_final': False,
+                                        'is_notification': True,
+                                        'notification_type': notification_data.get('notification_type', 'features')
+                                    }
+                                )
+                            else:
+                                await self.send(text_data=json.dumps({
+                                    'type': 'ai_chunk',
+                                    'chunk': '',  # No visible content
+                                    'is_final': False,
+                                    'is_notification': True,
+                                    'notification_type': notification_data.get('notification_type', 'features')
+                                }))
+                            continue  # Skip yielding this chunk as text
+                    except json.JSONDecodeError:
+                        # Not a valid JSON notification, treat as normal text
+                        pass
+                
+                # Normal text chunk
                 yield chunk
                 
                 # After yielding a chunk, check again if we should stop
@@ -419,7 +468,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             print(f"Error in process_ai_stream: {str(e)}")
             yield f"Error generating response: {str(e)}"
     
-    async def get_system_prompt(self):
+    async def get_system_prompt_(self):
         """
         Get the system prompt for the AI
         """
@@ -465,14 +514,34 @@ the core functionalities, the design layout, etc.
             return None
     
     @database_sync_to_async
-    def create_conversation(self, title):
+    def create_conversation(self, title, project_id=None):
         """
         Create a new conversation
         """
-        return Conversation.objects.create(
+        # Only create conversation if project_id is provided
+        if not project_id:
+            print("Cannot create conversation without project_id")
+            return None
+            
+        conversation = Conversation.objects.create(
             user=self.user,
             title=title
         )
+        
+        # Set project reference if provided
+        try:
+            from projects.models import Project
+            project = Project.objects.get(id=project_id, owner=self.user)
+            conversation.project = project
+            conversation.save()
+            print(f"Set project reference for conversation {conversation.id} to project {project_id}")
+        except Exception as e:
+            # If we can't find the project, delete the conversation we just created
+            conversation.delete()
+            print(f"Error setting project reference: {str(e)}")
+            return None
+                
+        return conversation
     
     @database_sync_to_async
     def update_conversation_title(self, title):
@@ -532,9 +601,46 @@ the core functionalities, the design layout, etc.
         """
         Get project ID if conversation is linked to a project
         """
-        project_id = None
-        if self.conversation and hasattr(self.conversation, 'projects'):
-            projects = self.conversation.projects.all()
-            if projects.exists():
-                project_id = projects.first().id
-        return project_id 
+        if self.conversation and self.conversation.project:
+            return self.conversation.project.id
+        return None
+    
+    async def generate_title_with_ai(self, user_message, ai_response):
+        """
+        Generate a conversation title using AI based on the first user message and AI response
+        """
+        # Use the same provider as the chat
+        provider_name = settings.AI_PROVIDER_DEFAULT
+        provider = AIProvider.get_provider(provider_name)
+        
+        # Create a special prompt for title generation
+        title_prompt = [
+            {
+                "role": "system",
+                "content": "Generate a short, concise title (maximum 50 characters) that summarizes this conversation. The title should capture the main topic or purpose of the discussion. Only respond with the title text, no additional commentary or formatting."
+            },
+            {
+                "role": "user", 
+                "content": f"User: {user_message[:200]}...\nAI: {ai_response[:200]}..."
+            }
+        ]
+        
+        try:
+            # Generate title non-streaming
+            title = ""
+            async for content in self.process_ai_stream(provider, title_prompt):
+                title += content
+                
+            # Clean and truncate the generated title
+            title = title.strip()
+            if len(title) > 50:
+                title = title[:47] + "..."
+                
+            # Update the conversation title
+            await self.update_conversation_title(title)
+            print(f"Generated title for conversation {self.conversation.id}: {title}")
+            
+        except Exception as e:
+            print(f"Error generating title: {str(e)}")
+            # Fallback to original behavior
+            await self.update_conversation_title(user_message[:50]) 

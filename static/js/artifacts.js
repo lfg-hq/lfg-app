@@ -182,9 +182,13 @@ document.addEventListener('DOMContentLoaded', function() {
         
         if (isExpanded) {
             const panelWidth = width || parseInt(getComputedStyle(artifactsPanel).width);
-            chatContainer.style.right = panelWidth + 'px';
+            // Update width and margin instead of right position
+            chatContainer.style.width = `calc(100% - ${panelWidth}px)`;
+            chatContainer.style.marginRight = `${panelWidth}px`;
         } else {
-            chatContainer.style.right = '0'; // Full width when panel is hidden
+            // Reset to full width when panel is hidden
+            chatContainer.style.width = '100%';
+            chatContainer.style.marginRight = '0';
         }
     }
     
@@ -327,4 +331,34 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     };
+
+    // Tab switching functionality
+    const tabButtons = document.querySelectorAll('.tab-button');
+    const tabPanes = document.querySelectorAll('.tab-pane');
+
+    function switchTab(tabId) {
+        // Remove active class from all buttons and panes
+        tabButtons.forEach(button => button.classList.remove('active'));
+        tabPanes.forEach(pane => pane.classList.remove('active'));
+
+        // Add active class to clicked button and corresponding pane
+        const activeButton = document.querySelector(`[data-tab="${tabId}"]`);
+        const activePane = document.getElementById(tabId);
+        
+        if (activeButton && activePane) {
+            activeButton.classList.add('active');
+            activePane.classList.add('active');
+        }
+    }
+
+    // Make switchTab function available globally
+    window.switchTab = switchTab;
+
+    // Add click event listeners to all tab buttons
+    tabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const tabId = button.getAttribute('data-tab');
+            switchTab(tabId);
+        });
+    });
 }); 

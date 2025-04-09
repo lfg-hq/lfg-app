@@ -1,4 +1,3 @@
-
 import json
 from django.shortcuts import get_object_or_404
 from django.http import StreamingHttpResponse
@@ -33,7 +32,7 @@ the core functionalities, the design layout, etc.
 @csrf_exempt
 @require_http_methods(["POST"])
 @login_required
-def chat_api(request):
+def chat_api__to_be_removed(request):
     """Handle chat API requests and stream responses."""
     data = json.loads(request.body)
     user_message = data.get('message', '')
@@ -95,8 +94,39 @@ def chat_api(request):
         
         # Update conversation title if it's new
         if not conversation.title or conversation.title == conversation.id:
-            conversation.title = user_message[:50]
-            conversation.save()
+            # Generate title using AI based on the conversation
+            try:
+                # Create a special prompt for title generation
+                title_prompt = [
+                    {
+                        "role": "system",
+                        "content": "Generate a short, concise title (maximum 50 characters) that summarizes this conversation. The title should capture the main topic or purpose of the discussion. Only respond with the title text, no additional commentary or formatting."
+                    },
+                    {
+                        "role": "user", 
+                        "content": f"User: {user_message[:200]}...\nAI: {full_response[:200]}..."
+                    }
+                ]
+                
+                # Generate the title
+                title = ""
+                for content in ai_provider.generate_stream(title_prompt):
+                    title += content
+                
+                # Clean and truncate the generated title
+                title = title.strip()
+                if len(title) > 50:
+                    title = title[:47] + "..."
+                
+                # Update the conversation title
+                conversation.title = title
+                conversation.save()
+                print(f"Generated title for conversation {conversation.id}: {title}")
+            except Exception as e:
+                # Fallback to original behavior
+                print(f"Error generating title: {str(e)}")
+                conversation.title = user_message[:50]
+                conversation.save()
             
         # Get project_id if conversation is linked to a project
         project_id = None

@@ -43,7 +43,7 @@ def auth(request):
                 next_url = request.GET.get('next')
                 if next_url:
                     return redirect(next_url)
-                return redirect('/chat/')  # Direct URL is more reliable here
+                return redirect('project_list')  # Changed from projects:project_list to project_list
         
         elif form_type == 'register':
             register_form = UserRegisterForm(request.POST)

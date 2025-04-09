@@ -2,7 +2,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.contrib import messages
-from .models import Project
+from .models import Project, ProjectFeature
 from django.views.decorators.http import require_POST
 
 # Create your views here.
@@ -19,6 +19,7 @@ def project_list(request):
 def project_detail(request, project_id):
     """View to display a specific project"""
     project = get_object_or_404(Project, id=project_id, owner=request.user)
+    print(project.direct_conversations.all())
     return render(request, 'projects/project_detail.html', {
         'project': project
     })
@@ -79,3 +80,21 @@ def delete_project(request, project_id):
     
     messages.success(request, f"Project '{project_name}' deleted successfully")
     return redirect('project_list')
+
+@login_required
+def project_features_api(request, project_id):
+    """API view to get features for a project"""
+    project = get_object_or_404(Project, id=project_id, owner=request.user)
+    features = ProjectFeature.objects.filter(project=project).order_by('-created_at')
+    
+    features_list = []
+    for feature in features:
+        features_list.append({
+            'id': feature.id,
+            'name': feature.name,
+            'description': feature.description,
+            'details': feature.details,
+            'priority': feature.priority
+        })
+    
+    return JsonResponse({'features': features_list})
