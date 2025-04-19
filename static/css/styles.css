@@ -629,6 +629,42 @@ body, html {
     color: var(--text-secondary);
 }
 
+/* Table styling for markdown */
+.message-content table {
+    border-collapse: collapse;
+    margin: 1em 0;
+    width: 100%;
+    overflow-x: auto;
+    display: block;
+}
+
+.message-content th {
+    background-color: rgba(187, 134, 252, 0.1);
+    color: var(--primary-color);
+    font-weight: 600;
+    text-align: left;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+}
+
+.message-content td {
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+}
+
+.message-content tr {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.message-content tr:nth-child(even) {
+    background-color: rgba(0, 0, 0, 0.1);
+}
+
+.message-content tr:hover {
+    background-color: rgba(187, 134, 252, 0.05);
+}
+
 /* Loading indicator */
 .typing-indicator {
     display: flex;

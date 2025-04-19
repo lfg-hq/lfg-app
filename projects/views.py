@@ -2,7 +2,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.contrib import messages
-from .models import Project, ProjectFeature
+from .models import Project, ProjectFeature, ProjectPersona, ProjectPRD, ProjectDesignSchema, ProjectTickets
 from django.views.decorators.http import require_POST
 
 # Create your views here.
@@ -98,3 +98,93 @@ def project_features_api(request, project_id):
         })
     
     return JsonResponse({'features': features_list})
+
+@login_required
+def project_personas_api(request, project_id):
+    """API view to get personas for a project"""
+    project = get_object_or_404(Project, id=project_id, owner=request.user)
+    personas = ProjectPersona.objects.filter(project=project).order_by('-created_at')
+    
+    personas_list = []
+    for persona in personas:
+        personas_list.append({
+            'id': persona.id,
+            'name': persona.name,
+            'role': persona.role,
+            'description': persona.description
+        })
+    
+    return JsonResponse({'personas': personas_list})
+
+@login_required
+def project_prd_api(request, project_id):
+    """API view to get PRD for a project"""
+    project = get_object_or_404(Project, id=project_id, owner=request.user)
+    
+    # Get the PRD or create it if it doesn't exist
+    prd, created = ProjectPRD.objects.get_or_create(
+        project=project,
+        defaults={'prd': ''}  # Default empty content if we're creating a new PRD
+    )
+    
+    # Convert to JSON-serializable format
+    prd_data = {
+        'id': prd.id,
+        'content': prd.prd,
+        'title': 'Product Requirement Document',
+        'updated_at': prd.updated_at.strftime('%Y-%m-%d %H:%M') if prd.updated_at else None
+    }
+    
+    return JsonResponse(prd_data)   
+
+@login_required
+def project_design_schema_api(request, project_id):
+    """API view to get design schema for a project"""
+    project = get_object_or_404(Project, id=project_id, owner=request.user)
+    
+    # Get the design schema or create it if it doesn't exist
+    design_schema, created = ProjectDesignSchema.objects.get_or_create(
+        project=project,
+        defaults={'design_schema': ''}  # Default empty content if we're creating a new design schema
+    )
+    
+    # Convert to JSON-serializable format
+    design_schema_data = {
+        'id': design_schema.id,
+        'content': design_schema.design_schema,
+        'title': 'Design Schema',
+        'updated_at': design_schema.updated_at.strftime('%Y-%m-%d %H:%M') if design_schema.updated_at else None
+    }
+    
+    return JsonResponse(design_schema_data)
+
+@login_required
+def project_tickets_api(request, project_id):
+    """API view to get tickets for a project, including feature information"""
+    project = get_object_or_404(Project, id=project_id, owner=request.user)
+    
+    # Get all tickets for this project
+    tickets = ProjectTickets.objects.filter(project=project).select_related('feature')
+    
+    tickets_list = []
+    for ticket in tickets:
+        tickets_list.append({
+            'id': ticket.id,
+            'ticket_id': ticket.ticket_id,
+            'title': ticket.title,
+            'description': ticket.description,
+            'status': ticket.status,
+            'feature': {
+                'id': ticket.feature.id,
+                'name': ticket.feature.name,
+                'priority': ticket.feature.priority
+            },
+            'backend_tasks': ticket.backend_tasks,
+            'frontend_tasks': ticket.frontend_tasks,
+            'implementation_steps': ticket.implementation_steps,
+            'created_at': ticket.created_at.isoformat(),
+            'updated_at': ticket.updated_at.isoformat(),
+        })
+    
+    return JsonResponse({'tickets': tickets_list})
+

@@ -61,12 +61,21 @@
 
             <!-- Design Tab -->
             <div class="tab-pane" id="design">
-                <div class="empty-state">
-                    <div class="empty-state-icon">
-                        <i class="fas fa-palette"></i>
+                <div class="design-container" style="width: 100%; height: 100%; position: absolute; top: 0; left: 0; right: 0; bottom: 0;">
+                    <div class="loading-state" id="design-loading" style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+                        <div class="spinner"></div>
+                        <div>Loading design elements...</div>
                     </div>
-                    <div class="empty-state-text">
-                        No design artifacts available yet.
+                    <div class="empty-state" id="design-empty" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+                        <div class="empty-state-icon">
+                            <i class="fas fa-palette"></i>
+                        </div>
+                        <div class="empty-state-text">
+                            No design artifacts available yet.
+                        </div>
+                    </div>
+                    <div class="design-frame-container" id="design-frame-container" style="display: none; width: 100%; height: 100%; position: absolute; top: 0; left: 0; right: 0; bottom: 0;">
+                        <iframe id="design-iframe" style="width: 100%; height: 100%; border: none;" sandbox="allow-same-origin"></iframe>
                     </div>
                 </div>
             </div>
@@ -81,6 +90,7 @@
                         No tickets created yet.
                     </div>
                 </div>
+                <!-- Ticket content will be loaded dynamically -->
             </div>
 
             <!-- Apps Tab -->

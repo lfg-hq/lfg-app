@@ -1,4 +1,27 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // Check if the artifacts panel is in the DOM
+    const artifactsPanel = document.getElementById('artifacts-panel');
+    if (artifactsPanel) {
+        console.log('✅ Artifacts panel found in DOM');
+    } else {
+        console.error('❌ Artifacts panel NOT found in DOM! This will cause issues with notifications.');
+    }
+    
+    // Check if the ArtifactsPanel API is available
+    if (window.ArtifactsPanel && typeof window.ArtifactsPanel.toggle === 'function') {
+        console.log('✅ ArtifactsPanel API is available');
+    } else {
+        console.log('❌ ArtifactsPanel API is NOT available yet. This may be a timing issue.');
+        // We'll check again after a delay to see if it's a timing issue
+        setTimeout(() => {
+            if (window.ArtifactsPanel && typeof window.ArtifactsPanel.toggle === 'function') {
+                console.log('✅ ArtifactsPanel API is now available (after delay)');
+            } else {
+                console.error('❌ ArtifactsPanel API is still NOT available after delay. Check script loading order.');
+            }
+        }, 1000);
+    }
+    
     const chatForm = document.getElementById('chat-form');
     const chatInput = document.getElementById('chat-input');
     const chatMessages = document.getElementById('chat-messages');
@@ -238,7 +261,29 @@ document.addEventListener('DOMContentLoaded', () => {
         
         socket.onmessage = function(event) {
             const data = JSON.parse(event.data);
+            
+            // Enhanced logging for debugging purposes
             console.log('WebSocket message received:', data);
+            
+            // Special handling for notifications - Use the same improved detection logic
+            const isNotification = data.is_notification === true || 
+                                  data.is_notification === "true" || 
+                                  (data.notification_type && data.notification_type !== "");
+                                  
+            const isEarlyNotification = isNotification && 
+                                       (data.early_notification === true || 
+                                        data.early_notification === "true");
+            
+            if (data.type === 'ai_chunk' && isNotification) {
+                console.log('%c NOTIFICATION DATA RECEIVED IN WEBSOCKET! ', 'background: #ffa500; color: #000; font-weight: bold; padding: 2px 5px;');
+                console.log('Notification data:', data);
+                console.log('Is early notification:', isEarlyNotification);
+                
+                if (isEarlyNotification) {
+                    console.log('%c EARLY NOTIFICATION RECEIVED! ', 'background: #ff0000; color: #fff; font-weight: bold; padding: 2px 5px;');
+                    console.log('Function name:', data.function_name);
+                }
+            }
             
             // Log message content for troubleshooting empty messages
             if (data.type === 'ai_chunk' && data.is_final) {
@@ -351,7 +396,28 @@ document.addEventListener('DOMContentLoaded', () => {
     function handleAIChunk(data) {
         const chunk = data.chunk;
         const isFinal = data.is_final;
-        const isNotification = data.is_notification;
+        
+        // Add explicit debug for notification property
+        console.log('Data object type:', typeof data);
+        console.log('is_notification raw value:', data.is_notification);
+        console.log('is_notification type:', typeof data.is_notification);
+        
+        // Fix notification detection by checking for either boolean true, string "true", or existence of notification_type
+        // This handles cases where is_notification is undefined but we still want to process regular chunks
+        const isNotification = data.is_notification === true || 
+                              data.is_notification === "true" || 
+                              (data.notification_type && data.notification_type !== "");
+                              
+        // Check if this is an early notification
+        const isEarlyNotification = isNotification && 
+                                   (data.early_notification === true || 
+                                    data.early_notification === "true");
+        
+        // Add additional debugging to see the entire data structure
+        console.log("Received AI chunk data:", data);
+        console.log("Is Notification (after fix):", isNotification);
+        console.log("Is Early Notification:", isEarlyNotification);
+        console.log("Function name (if early):", data.function_name || "none");
         
         if (isFinal) {
             // Final chunk with metadata
@@ -395,32 +461,240 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         
-        // Handle notifications
-        if (isNotification) {
-            console.log('Received notification:', data);
+        // Handle early notifications (show a function call indicator but don't open artifacts yet)
+        if (isEarlyNotification && data.function_name) {
+            console.log('\n\n==========================================');
+            console.log('EARLY NOTIFICATION RECEIVED:');
+            console.log('Function name early notification:', data.function_name);
+            console.log('Notification type:', data.notification_type);
+            console.log('Is early notification:', data.early_notification);
+            console.log('==========================================\n\n');
+            
+            // Remove any previous function call indicators
+            removeFunctionCallIndicator();
+            
+            // Show function call indicator for the function
+            showFunctionCallIndicator(data.function_name);
+            
+            // Add a visual "calling function" separator
+            const separator = document.createElement('div');
+            separator.className = 'function-call-separator';
+            separator.innerHTML = `<div class="separator-line"></div>
+                                  <div class="separator-text">Calling early notification function: ${data.function_name}</div>
+                                  <div class="separator-line"></div>`;
+            messageContainer.appendChild(separator);
+            scrollToBottom();
+            
+            return;
+        }
+        
+        // Handle regular (completion) notifications
+        if (isNotification && !isEarlyNotification) {
+            console.log('\n\n==========================================');
+            console.log('COMPLETION NOTIFICATION RECEIVED - DETAILED DEBUG INFO:');
+            console.log('Full data object:', data);
+            console.log('Notification type:', data.notification_type);
+            console.log('Current project ID:', currentProjectId);
+            console.log('==========================================\n\n');
+            
+            // Show a function call indicator in the UI for the function that generated this notification
+            const functionName = data.notification_type === 'features' ? 'extract_features' : 
+                               data.notification_type === 'personas' ? 'extract_personas' : 
+                               data.function_name || data.notification_type;
+            
+            // Remove any previous function call indicators
+            removeFunctionCallIndicator();
+            
+            // Show success message
+            showFunctionCallSuccess(functionName, data.notification_type);
+            
+            // Check if we have a valid project ID from somewhere
+            if (!currentProjectId) {
+                // Try to get project ID from URL first
+                const urlParams = new URLSearchParams(window.location.search);
+                const urlProjectId = urlParams.get('project_id');
+                
+                // Then try from path (format: /chat/project/{id}/)
+                const pathProjectId = extractProjectIdFromPath();
+                
+                if (urlProjectId) {
+                    console.log(`Using project ID from URL: ${urlProjectId}`);
+                    currentProjectId = urlProjectId;
+                } else if (pathProjectId) {
+                    console.log(`Using project ID from path: ${pathProjectId}`);
+                    currentProjectId = pathProjectId;
+                }
+            }
+            
+            // If still no project ID, we can't proceed with loading artifacts
+            if (!currentProjectId) {
+                console.error('Unable to determine project ID for notification! Cannot load artifacts.');
+                // Try to at least open the panel even if we can't load content
+                if (window.ArtifactsPanel && typeof window.ArtifactsPanel.toggle === 'function') {
+                    console.log('Opening artifacts panel with forceOpen=true');
+                    try {
+                        window.ArtifactsPanel.toggle(true); // Use forceOpen parameter to ensure it opens
+                        console.log('ArtifactsPanel.toggle called successfully');
+                        
+                        // Double check if panel is actually open now
+                        const panel = document.getElementById('artifacts-panel');
+                        if (panel) {
+                            console.log('Panel element found, expanded status:', panel.classList.contains('expanded'));
+                            if (!panel.classList.contains('expanded')) {
+                                console.log('Panel still not expanded after toggle, forcing expanded class');
+                                panel.classList.add('expanded');
+                                document.querySelector('.app-container')?.classList.add('artifacts-expanded');
+                                document.getElementById('artifacts-button')?.classList.add('active');
+                            }
+                        } else {
+                            console.error('Could not find artifacts-panel element in DOM');
+                        }
+                    } catch (err) {
+                        console.error('Error toggling artifacts panel:', err);
+                    }
+                } else {
+                    console.error('ArtifactsPanel not available!', window.ArtifactsPanel);
+                }
+                return;
+            }
+            
+            console.log('\n\nArtifacts Panel Status:');
+            console.log('ArtifactsPanel available:', !!window.ArtifactsPanel);
+            console.log('Toggle function available:', !!(window.ArtifactsPanel && typeof window.ArtifactsPanel.toggle === 'function'));
             
             // Make sure artifacts panel is visible
+            let panelOpenSuccess = false;
+            
             if (window.ArtifactsPanel && typeof window.ArtifactsPanel.toggle === 'function') {
-                window.ArtifactsPanel.toggle();
+                console.log('Opening artifacts panel with ArtifactsPanel.toggle');
+                try {
+                    window.ArtifactsPanel.toggle(true); // Use forceOpen parameter to ensure it opens
+                    console.log('ArtifactsPanel.toggle called successfully');
+                    
+                    // Double check if panel is actually open now
+                    const panel = document.getElementById('artifacts-panel');
+                    if (panel) {
+                        console.log('Panel element found, expanded status:', panel.classList.contains('expanded'));
+                        panelOpenSuccess = panel.classList.contains('expanded');
+                        
+                        if (!panelOpenSuccess) {
+                            console.log('Panel still not expanded after toggle, adding expanded class directly');
+                            panel.classList.add('expanded');
+                            document.querySelector('.app-container')?.classList.add('artifacts-expanded');
+                            document.getElementById('artifacts-button')?.classList.add('active');
+                            panelOpenSuccess = true;
+                        }
+                    } else {
+                        console.error('Could not find artifacts-panel element in DOM');
+                    }
+                } catch (err) {
+                    console.error('Error toggling artifacts panel:', err);
+                }
+            } else {
+                console.error('ArtifactsPanel not available!', window.ArtifactsPanel);
             }
+            
+            // If the panel still isn't open, try the direct approach
+            if (!panelOpenSuccess && window.forceOpenArtifactsPanel) {
+                console.log('Using forceOpenArtifactsPanel as fallback');
+                window.forceOpenArtifactsPanel(data.notification_type);
+                panelOpenSuccess = true;
+            }
+            
+            // Last resort - direct DOM manipulation if all else fails
+            if (!panelOpenSuccess) {
+                console.log('Attempting direct DOM manipulation to open panel');
+                try {
+                    // Try to manipulate DOM directly
+                    const panel = document.getElementById('artifacts-panel');
+                    const appContainer = document.querySelector('.app-container');
+                    const button = document.getElementById('artifacts-button');
+                    
+                    if (panel && appContainer) {
+                        panel.classList.add('expanded');
+                        appContainer.classList.add('artifacts-expanded');
+                        if (button) button.classList.add('active');
+                        console.log('Panel forced open with direct DOM manipulation');
+                        panelOpenSuccess = true;
+                    }
+                } catch (e) {
+                    console.error('Error in direct DOM manipulation:', e);
+                }
+            }
+            
+            console.log('\n\nTab Switching Status:');
+            console.log('switchTab available:', !!window.switchTab);
+            console.log('notification_type available:', !!data.notification_type);
             
             // Switch to the appropriate tab
             if (window.switchTab && data.notification_type) {
-                window.switchTab(data.notification_type);
+                console.log(`Switching to tab: ${data.notification_type}`);
                 
-                // Load the content for that tab if we have a project ID
-                if (currentProjectId) {
-                    if (data.notification_type === 'features' && 
-                        window.ArtifactsLoader && 
-                        typeof window.ArtifactsLoader.loadFeatures === 'function') {
-                        window.ArtifactsLoader.loadFeatures(currentProjectId);
-                    } else if (data.notification_type === 'personas' && 
-                              window.ArtifactsLoader && 
-                              typeof window.ArtifactsLoader.loadPersonas === 'function') {
-                        window.ArtifactsLoader.loadPersonas(currentProjectId);
+                // Try the standard tab switching first
+                try {
+                    window.switchTab(data.notification_type);
+                    console.log('Tab switched successfully using window.switchTab');
+                } catch (err) {
+                    console.error('Error switching tab with window.switchTab:', err);
+                    
+                    // Try direct DOM manipulation as fallback
+                    try {
+                        const tabButtons = document.querySelectorAll('.tab-button');
+                        const tabPanes = document.querySelectorAll('.tab-pane');
+                        
+                        // Find the right tab
+                        const targetButton = document.querySelector(`.tab-button[data-tab="${data.notification_type}"]`);
+                        const targetPane = document.getElementById(data.notification_type);
+                        
+                        if (targetButton && targetPane) {
+                            // Remove active class from all tabs
+                            tabButtons.forEach(btn => btn.classList.remove('active'));
+                            tabPanes.forEach(pane => pane.classList.remove('active'));
+                            
+                            // Set active class on the target tab
+                            targetButton.classList.add('active');
+                            targetPane.classList.add('active');
+                            console.log('Tab switched successfully using direct DOM manipulation');
+                        } else {
+                            console.error(`Could not find tab elements for ${data.notification_type}`);
+                        }
+                    } catch (domErr) {
+                        console.error('Error switching tab with direct DOM manipulation:', domErr);
                     }
                 }
+                
+                // Load the content for that tab if we have a project ID
+                console.log(`Current project ID for loading: ${currentProjectId}`);
+                
+                console.log('\n\nLoader Status:');
+                console.log('ArtifactsLoader available:', !!window.ArtifactsLoader);
+                console.log(`loadFeatures function available:`, !!(window.ArtifactsLoader && typeof window.ArtifactsLoader.loadFeatures === 'function'));
+                console.log(`loadPersonas function available:`, !!(window.ArtifactsLoader && typeof window.ArtifactsLoader.loadPersonas === 'function'));
+                console.log(`loadPRD function available:`, !!(window.ArtifactsLoader && typeof window.ArtifactsLoader.loadPRD === 'function'));
+                
+                // Load the appropriate content based on notification type
+                if (data.notification_type === 'features' && 
+                    window.ArtifactsLoader && 
+                    typeof window.ArtifactsLoader.loadFeatures === 'function') {
+                    console.log(`Calling ArtifactsLoader.loadFeatures(${currentProjectId})`);
+                    window.ArtifactsLoader.loadFeatures(currentProjectId);
+                } else if (data.notification_type === 'personas' && 
+                          window.ArtifactsLoader && 
+                          typeof window.ArtifactsLoader.loadPersonas === 'function') {
+                    console.log(`Calling ArtifactsLoader.loadPersonas(${currentProjectId})`);
+                    window.ArtifactsLoader.loadPersonas(currentProjectId);
+                } else if (data.notification_type === 'prd' && 
+                          window.ArtifactsLoader && 
+                          typeof window.ArtifactsLoader.loadPRD === 'function') {
+                    console.log(`Calling ArtifactsLoader.loadPRD(${currentProjectId})`);
+                    window.ArtifactsLoader.loadPRD(currentProjectId);
+                } else {
+                    console.error(`ArtifactsLoader.load${data.notification_type} not available!`, window.ArtifactsLoader);
+                }
+            } else {
+                console.error(`switchTab not available or no notification_type provided!`);
             }
+            console.log('==========================================\n\n');
             return;
         }
         
@@ -437,6 +711,9 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         
+        // Check for function call mentions in text
+        checkForFunctionCall(chunk);
+        
         // Get or create the assistant message
         const assistantMessage = document.querySelector('.message.assistant:last-child');
         if (assistantMessage) {
@@ -448,6 +725,35 @@ document.addEventListener('DOMContentLoaded', () => {
             // Store raw content and render with markdown
             existingContent.setAttribute('data-raw-content', newContent);
             existingContent.innerHTML = marked.parse(newContent);
+            
+            // Check if this chunk seems to finalize a function call statement
+            if (chunk.includes("function") && 
+                (chunk.includes("extract_features") || 
+                 chunk.includes("extract_personas") || 
+                 chunk.includes("get_features") || 
+                 chunk.includes("get_personas"))) {
+                
+                // Identify which function is being called
+                let functionName = "";
+                if (chunk.includes("extract_features")) functionName = "extract_features";
+                else if (chunk.includes("extract_personas")) functionName = "extract_personas";
+                else if (chunk.includes("get_features")) functionName = "get_features";
+                else if (chunk.includes("get_personas")) functionName = "get_personas";
+                
+                if (functionName && !document.querySelector('.function-call-indicator')) {
+                    // Show the function call indicator
+                    showFunctionCallIndicator(functionName);
+                    
+                    // Add a visual "calling function" separator
+                    const separator = document.createElement('div');
+                    separator.className = 'function-call-separator';
+                    separator.innerHTML = `<div class="separator-line"></div>
+                                          <div class="separator-text">Calling function: ${functionName}</div>
+                                          <div class="separator-line"></div>`;
+                    messageContainer.appendChild(separator);
+                    scrollToBottom();
+                }
+            }
         } else {
             // Remove typing indicator if present
             const typingIndicator = document.querySelector('.typing-indicator');
@@ -644,6 +950,204 @@ document.addEventListener('DOMContentLoaded', () => {
         const typingIndicator = document.querySelector('.typing-indicator');
         if (typingIndicator) {
             typingIndicator.remove();
+        }
+    }
+    
+    // Function to show a function call indicator
+    function showFunctionCallIndicator(functionName) {
+        // Remove any existing function call indicators
+        removeFunctionCallIndicator();
+        
+        // Get a user-friendly function description
+        const functionDetails = getFunctionDetails(functionName);
+        
+        // Create the indicator element
+        const indicator = document.createElement('div');
+        indicator.className = 'function-call-indicator';
+        indicator.innerHTML = `
+            <div class="function-call-spinner"></div>
+            <div class="function-call-text">
+                <div class="function-name">${functionName}()</div>
+                <div class="function-status">
+                    ${functionDetails.description || 'Processing function call...'}
+                </div>
+            </div>
+        `;
+        
+        // Add to message container
+        messageContainer.appendChild(indicator);
+        scrollToBottom();
+        
+        return indicator;
+    }
+    
+    // Function to show a function call success message
+    function showFunctionCallSuccess(functionName, type) {
+        // Remove any existing function call indicators
+        removeFunctionCallIndicator();
+        
+        // Get function details
+        const functionDetails = getFunctionDetails(functionName);
+        
+        // Create the success element
+        const successElement = document.createElement('div');
+        successElement.className = 'function-call-success';
+        
+        let message = '';
+        if (type === 'features') {
+            message = 'Features extracted and saved successfully!';
+        } else if (type === 'personas') {
+            message = 'Personas extracted and saved successfully!';
+        } else if (type === 'prd') {
+            message = 'PRD generated and saved successfully!';
+        } else {
+            message = 'Function call completed successfully!';
+        }
+        
+        successElement.innerHTML = `
+            <div class="function-call-icon">✓</div>
+            <div class="function-call-text">
+                <div class="function-name">${functionName}()</div>
+                <div class="function-result">
+                    ${message}<br>
+                    <small>${functionDetails.successMessage || 'Results have been processed and saved.'}</small>
+                </div>
+            </div>
+        `;
+        
+        // Add to message container
+        messageContainer.appendChild(successElement);
+        scrollToBottom();
+        
+        // Also add a permanent mini indicator
+        addFunctionCallMiniIndicator(functionName, type);
+        
+        // Remove after a delay
+        setTimeout(() => {
+            if (successElement.parentNode) {
+                successElement.classList.add('fade-out');
+                setTimeout(() => {
+                    if (successElement.parentNode) {
+                        successElement.remove();
+                    }
+                }, 500); // fade out time
+            }
+        }, 4000); // show for 4 seconds
+    }
+    
+    // Function to add a permanent mini indicator of function call success
+    function addFunctionCallMiniIndicator(functionName, type) {
+        // Create mini indicator
+        const miniIndicator = document.createElement('div');
+        miniIndicator.className = 'function-mini-indicator';
+        
+        let icon = '';
+        if (type === 'features') icon = '📋';
+        else if (type === 'personas') icon = '👥';
+        else if (type === 'prd') icon = '📄';
+        else icon = '✓';
+        
+        miniIndicator.innerHTML = `
+            <span class="mini-icon">${icon}</span>
+            <span class="mini-name">${functionName}</span>
+        `;
+        
+        // Add it to the message container
+        messageContainer.appendChild(miniIndicator);
+        
+        // Add fade-in animation
+        setTimeout(() => {
+            miniIndicator.classList.add('show');
+        }, 100);
+    }
+    
+    // Helper function to get function details for UI display
+    function getFunctionDetails(functionName) {
+        const functionDetails = {
+            'extract_features': {
+                description: 'Extracting and processing features from the conversation...',
+                successMessage: 'Features have been extracted, categorized, and saved to the project.'
+            },
+            'extract_personas': {
+                description: 'Analyzing and extracting personas from the conversation...',
+                successMessage: 'Personas have been identified and saved to the project.'
+            },
+            'get_features': {
+                description: 'Retrieving existing features for this project...',
+                successMessage: 'Existing features have been loaded from the database.'
+            },
+            'get_personas': {
+                description: 'Retrieving existing personas for this project...',
+                successMessage: 'Existing personas have been loaded from the database.'
+            },
+            'extract_prd': {
+                description: 'Generating and processing PRD from the conversation...',
+                successMessage: 'PRD has been generated and saved to the project.'
+            },
+            'get_prd': {
+                description: 'Retrieving existing PRD for this project...',
+                successMessage: 'Existing PRD has been loaded from the database.'
+            }
+        };
+        
+        return functionDetails[functionName] || {};
+    }
+    
+    // Function to remove any function call indicators
+    function removeFunctionCallIndicator() {
+        const existingIndicators = document.querySelectorAll('.function-call-indicator, .function-call-success');
+        existingIndicators.forEach(indicator => {
+            indicator.remove();
+        });
+    }
+    
+    // Add new function to detect function calls in text and show indicators
+    function checkForFunctionCall(text) {
+        // More comprehensive patterns to detect function calls in the AI's text
+        const patterns = [
+            // Standard function call patterns
+            /(?:I'll|I will|Let me|I'm going to|I am going to)\s+(?:call|use|execute|run)\s+(?:the\s+)?`?(\w+)`?\s+function/i,
+            
+            // Direct function mentions
+            /(?:calling|executing|running|using)\s+(?:the\s+)?`?(\w+)`?\s+function/i,
+            
+            // Code block style mentions
+            /```(?:python|js|javascript)?\s*(?:function\s+)?(\w+)\s*\(/i,
+            
+            // Now let's/I'm extracting patterns
+            /(?:Now|I'm|I am)\s+(?:extracting|getting)\s+(?:the\s+)?(\w+)/i,
+            
+            // Calling with specific syntax
+            /(?:extract_(\w+)|get_(\w+))\(/i
+        ];
+        
+        // Check each pattern
+        for (const pattern of patterns) {
+            const match = text.match(pattern);
+            if (match) {
+                let functionName = '';
+                
+                // Special case for the last pattern with capturing groups
+                if (pattern.toString().includes('extract_') && (match[1] || match[2])) {
+                    functionName = match[1] ? `extract_${match[1]}` : `get_${match[2]}`;
+                } else if (match[1]) {
+                    functionName = match[1].toLowerCase();
+                    
+                    // Handle some common variations
+                    if (functionName === 'extract' || functionName === 'extracting') functionName = 'extract_features';
+                    if (functionName === 'features') functionName = 'extract_features';
+                    if (functionName === 'personas') functionName = 'extract_personas';
+                    if (functionName === 'prd') functionName = 'extract_prd';
+                }
+                
+                // Only show for known functions to avoid false positives
+                const knownFunctions = ['extract_features', 'extract_personas', 'get_features', 'get_personas', 'extract_prd', 'get_prd'];
+                
+                if (knownFunctions.includes(functionName)) {
+                    showFunctionCallIndicator(functionName);
+                    return; // Exit after finding the first match
+                }
+            }
         }
     }
     
@@ -901,4 +1405,170 @@ document.addEventListener('DOMContentLoaded', () => {
         
         return conversationItem;
     }
+
+    // Add a test function to simulate a notification for debugging purposes
+    window.testNotification = function(type) {
+        console.log('Manually triggering notification test...');
+        const notificationType = type || 'features';
+        
+        // Create a fake notification data object
+        const fakeNotificationData = {
+            type: 'ai_chunk',
+            chunk: '',
+            is_final: false,
+            is_notification: true,
+            notification_type: notificationType
+        };
+        
+        // Process it through the normal handler
+        console.log('Simulating notification with data:', fakeNotificationData);
+        handleAIChunk(fakeNotificationData);
+    };
+
+    // Add a test function to simulate function call indicators for debugging
+    window.testFunctionCall = function(functionName) {
+        console.log('Testing function call indicator for:', functionName);
+        
+        const validFunctions = ['extract_features', 'extract_personas', 'get_features', 'get_personas'];
+        const fn = validFunctions.includes(functionName) ? functionName : validFunctions[0];
+        
+        // Add a simulated assistant message first
+        if (!document.querySelector('.message.assistant:last-child')) {
+            addMessageToChat('assistant', `I'll extract the key information from our conversation. Let me call the ${fn} function to process this data.`);
+        }
+        
+        // Add the separator that would normally appear right after the function mention
+        const separator = document.createElement('div');
+        separator.className = 'function-call-separator';
+        separator.innerHTML = `<div class="separator-line"></div>
+                              <div class="separator-text">Calling function: ${fn}</div>
+                              <div class="separator-line"></div>`;
+        messageContainer.appendChild(separator);
+        
+        // Show the function call indicator
+        showFunctionCallIndicator(fn);
+        
+        // After a delay, show the success message
+        setTimeout(() => {
+            const type = fn.includes('features') ? 'features' : 'personas';
+            showFunctionCallSuccess(fn, type);
+            
+            // Add a simulated response message
+            setTimeout(() => {
+                if (fn === 'extract_features') {
+                    addMessageToChat('assistant', 'I\'ve successfully extracted and saved the features. You can view them in the artifacts panel.');
+                } else if (fn === 'extract_personas') {
+                    addMessageToChat('assistant', 'I\'ve successfully identified and saved the personas. You can view them in the artifacts panel.');
+                } else {
+                    addMessageToChat('assistant', 'I\'ve successfully retrieved the data. You can view it in the artifacts panel.');
+                }
+            }, 1000);
+        }, 3000);
+    };
+
+    // Add a helper function to force open the artifacts panel
+    window.forceOpenArtifactsPanel = function(tabType) {
+        console.log('Force opening artifacts panel with tab:', tabType);
+        
+        // First try using the API if available
+        if (window.ArtifactsPanel && typeof window.ArtifactsPanel.toggle === 'function') {
+            window.ArtifactsPanel.toggle(true);
+        }
+        
+        // Then try direct DOM manipulation
+        const panel = document.getElementById('artifacts-panel');
+        const appContainer = document.querySelector('.app-container');
+        const button = document.getElementById('artifacts-button');
+        
+        if (panel && appContainer) {
+            panel.classList.add('expanded');
+            appContainer.classList.add('artifacts-expanded');
+            if (button) button.classList.add('active');
+        }
+        
+        // Then try to switch to the correct tab
+        if (window.switchTab && tabType) {
+            setTimeout(() => {
+                window.switchTab(tabType);
+                
+                // Try to load the content based on the tab type
+                if (window.ArtifactsLoader) {
+                    const projectId = currentProjectId || extractProjectIdFromPath() || 
+                                    new URLSearchParams(window.location.search).get('project_id');
+                    
+                    if (projectId) {
+                        if (tabType === 'features' && typeof window.ArtifactsLoader.loadFeatures === 'function') {
+                            window.ArtifactsLoader.loadFeatures(projectId);
+                        } else if (tabType === 'personas' && typeof window.ArtifactsLoader.loadPersonas === 'function') {
+                            window.ArtifactsLoader.loadPersonas(projectId);
+                        } else if (tabType === 'prd' && typeof window.ArtifactsLoader.loadPRD === 'function') {
+                            window.ArtifactsLoader.loadPRD(projectId);
+                        }
+                    }
+                }
+            }, 100); // Small delay to ensure panel is open first
+        }
+    };
+
+    /**
+     * Test function to demonstrate notification styles
+     * This can be called from the console with: testNotifications()
+     */
+    function testNotifications() {
+        console.log('Testing notification indicators');
+        
+        // Test default function call indicator
+        showFunctionCallIndicator('test_function');
+        
+        // Test function call for features
+        setTimeout(() => {
+            const featuresElement = document.createElement('div');
+            featuresElement.className = 'function-features';
+            document.querySelector('.messages').appendChild(featuresElement);
+            
+            showFunctionCallIndicator('extract_features', 'features');
+        }, 1000);
+        
+        // Test function call for personas
+        setTimeout(() => {
+            const personasElement = document.createElement('div');
+            personasElement.className = 'function-personas';
+            document.querySelector('.messages').appendChild(personasElement);
+            
+            showFunctionCallIndicator('extract_personas', 'personas');
+        }, 2000);
+        
+        // Test success notification
+        setTimeout(() => {
+            showFunctionCallSuccess('test_function');
+        }, 3000);
+        
+        // Test success notification for features
+        setTimeout(() => {
+            showFunctionCallSuccess('extract_features', 'features');
+        }, 4000);
+        
+        // Test success notification for personas
+        setTimeout(() => {
+            showFunctionCallSuccess('extract_personas', 'personas');
+        }, 5000);
+        
+        // Test mini indicators
+        setTimeout(() => {
+            addFunctionCallMiniIndicator('test_function');
+        }, 6000);
+        
+        setTimeout(() => {
+            addFunctionCallMiniIndicator('extract_features', 'features');
+        }, 6500);
+        
+        setTimeout(() => {
+            addFunctionCallMiniIndicator('extract_personas', 'personas');
+        }, 7000);
+        
+        console.log('All notification tests queued');
+    }
+
+    // Expose the test function globally
+    window.testNotifications = testNotifications;
 });

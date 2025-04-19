@@ -191,8 +191,20 @@ class ChatConsumer(AsyncWebsocketConsumer):
         
         # Add notification data if present
         if event.get('is_notification'):
+            print("\n\n=== NOTIFICATION BEING SENT TO CLIENT ===")
+            print(f"Notification type: {event.get('notification_type', 'features')}")
+            print(f"Is early notification: {event.get('early_notification', False)}")
+            print(f"Function name: {event.get('function_name', '')}")
+            print(f"Full event data: {event}")
+            print("=======================================\n\n")
+            
             response_data['is_notification'] = True
             response_data['notification_type'] = event.get('notification_type', 'features')
+            
+            # Add early notification flag and function name if present
+            if event.get('early_notification'):
+                response_data['early_notification'] = True
+                response_data['function_name'] = event.get('function_name', '')
         
         await self.send(text_data=json.dumps(response_data))
     
@@ -428,30 +440,54 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 # Check if this is a notification JSON
                 if isinstance(chunk, str) and chunk.startswith('{') and chunk.endswith('}'):
                     try:
+                        print("\n\n=== POTENTIAL NOTIFICATION JSON DETECTED ===")
+                        print(f"Raw chunk: {chunk}")
+                        
                         notification_data = json.loads(chunk)
+                        print(f"Parsed JSON: {notification_data}")
+                        
                         if 'is_notification' in notification_data and notification_data['is_notification']:
+                            print("This IS a valid notification!")
+                            print(f"Notification type: {notification_data.get('notification_type', 'features')}")
+                            
+                            # Check if this is an early notification
+                            is_early = notification_data.get('early_notification', False)
+                            function_name = notification_data.get('function_name', '')
+                            print(f"Is early notification__ 11: {is_early}")
+                            print(f"Function name for early notification: {function_name}")
+                            print("=======================================\n\n")
+                            
                             # This is a notification - send it as a special message
+                            notification_message = {
+                                'type': 'ai_chunk',
+                                'chunk': '',  # No visible content
+                                'is_final': False,
+                                'is_notification': True,
+                                'notification_type': notification_data.get('notification_type', 'features')
+                            }
+                            
+                            # Add early notification flag and function name if present
+                            if is_early:
+                                notification_message['early_notification'] = True
+                                notification_message['function_name'] = function_name
+                            
                             if hasattr(self, 'using_groups') and self.using_groups:
                                 await self.channel_layer.group_send(
                                     self.room_group_name,
                                     {
                                         'type': 'ai_response_chunk',
-                                        'chunk': '',  # No visible content
-                                        'is_final': False,
-                                        'is_notification': True,
-                                        'notification_type': notification_data.get('notification_type', 'features')
+                                        **notification_message
                                     }
                                 )
                             else:
-                                await self.send(text_data=json.dumps({
-                                    'type': 'ai_chunk',
-                                    'chunk': '',  # No visible content
-                                    'is_final': False,
-                                    'is_notification': True,
-                                    'notification_type': notification_data.get('notification_type', 'features')
-                                }))
+                                await self.send(text_data=json.dumps(notification_message))
                             continue  # Skip yielding this chunk as text
+                        else:
+                            print("This is NOT a notification (missing is_notification flag)")
+                            print("=======================================\n\n")
                     except json.JSONDecodeError:
+                        print("Not a valid JSON - treating as normal text")
+                        print("=======================================\n\n")
                         # Not a valid JSON notification, treat as normal text
                         pass
                 
@@ -573,7 +609,9 @@ the core functionalities, the design layout, etc.
         if not self.conversation:
             return []
             
-        messages = Message.objects.filter(conversation=self.conversation).order_by('created_at')
+        messages = Message.objects.filter(conversation=self.conversation).order_by('-created_at')[:5]
+        messages = reversed(list(messages))  # Convert to list and reverse
+        print("\n\n Messages: ", messages)
         return [
             {"role": msg.role, "content": msg.content}
             for msg in messages

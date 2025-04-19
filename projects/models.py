@@ -56,3 +56,48 @@ class ProjectPersona(models.Model):
     
     def __str__(self):
         return f"{self.name} - {self.role} ({self.project.name})"
+
+
+class ProjectPRD(models.Model):
+    project = models.OneToOneField(Project, on_delete=models.CASCADE, related_name="prd")
+    prd = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return f"{self.project.name} - PRD"
+
+    def get_prd(self):
+        return self.prd
+
+
+class ProjectDesignSchema(models.Model):
+    project = models.OneToOneField(Project, on_delete=models.CASCADE, related_name="design_schema")
+    design_schema = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def get_design_schema(self):
+        return self.design_schema
+    
+    
+class ProjectTickets(models.Model):
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="tickets")
+    feature = models.ForeignKey(ProjectFeature, on_delete=models.CASCADE, related_name="tickets")
+    ticket_id = models.CharField(max_length=255)
+    title = models.CharField(max_length=255)
+    description = models.TextField()
+    status = models.CharField(max_length=20, choices=(
+        ('open', 'Open'),
+        ('in_progress', 'In Progress'),
+        ('agent', 'Agent'),
+        ('closed', 'Closed'),
+    ), default='open')
+    backend_tasks = models.TextField(default='')
+    frontend_tasks = models.TextField(default='')
+    implementation_steps = models.TextField(default='')
+    test_case = models.TextField(default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    

@@ -46,6 +46,7 @@ class OpenAIProvider(AIProvider):
         # This is compatible with newer versions of the OpenAI library
         self.client = openai.OpenAI(api_key=api_key)
         self.model = "gpt-4o"
+        # self.model = "gpt-4.1"
     
     def generate_stream(self, messages, project_id):
         current_messages = list(messages) # Work on a copy
@@ -89,6 +90,7 @@ class OpenAIProvider(AIProvider):
 
                     # --- Accumulate Tool Call Details --- 
                     if delta.tool_calls:
+                        
                         for tool_call_chunk in delta.tool_calls:
                             # Find or create the tool call entry
                             tc_index = tool_call_chunk.index
@@ -101,7 +103,30 @@ class OpenAIProvider(AIProvider):
                                 current_tc["id"] = tool_call_chunk.id
                             if tool_call_chunk.function:
                                 if tool_call_chunk.function.name:
-                                    current_tc["function"]["name"] = tool_call_chunk.function.name
+                                    # Send early notification as soon as we know the function name
+                                    function_name = tool_call_chunk.function.name
+                                    current_tc["function"]["name"] = function_name
+                                    
+                                    # Determine notification type based on function name
+                                    notification_type = None
+                                    if function_name == "extract_features":
+                                        notification_type = "features"
+                                    elif function_name == "extract_personas":
+                                        notification_type = "personas"
+                                    
+                                    # Send early notification if it's an extraction function
+                                    if notification_type:
+                                        print(f"\n\n=== SENDING EARLY NOTIFICATION FOR {function_name} ===")
+                                        early_notification = {
+                                            "is_notification": True,
+                                            "notification_type": notification_type,
+                                            "early_notification": True,
+                                            "function_name": function_name
+                                        }
+                                        yield json.dumps(early_notification)
+                                        print(f"Early notification sent__: {early_notification}")
+                                        print("==========================================\n\n")
+                                
                                 if tool_call_chunk.function.arguments:
                                     current_tc["function"]["arguments"] += tool_call_chunk.function.arguments
 
@@ -134,22 +159,39 @@ class OpenAIProvider(AIProvider):
                                 try:
                                     parsed_args = json.loads(tool_call_args_str)
                                     tool_result = app_functions(tool_call_name, parsed_args, project_id)
+
+                                    print("\n\n\n\nTool Result: ", tool_result)
+                                    print("\n\n\n\n")
                                     
+                                    # Handle the case where tool_result is None
+                                    if tool_result is None:
+                                        result_content = "The function returned no result."
                                     # Handle the case where tool_result is a dict with notification data
-                                    if isinstance(tool_result, dict) and tool_result.get("is_notification") is True:
+                                    elif isinstance(tool_result, dict) and tool_result.get("is_notification") is True:
                                         # Set notification data to be yielded later
+                                        print("\n\n=== NOTIFICATION DATA CREATED IN OPENAI PROVIDER ===")
+                                        print(f"Tool result: {tool_result}")
+                                        
                                         notification_data = {
                                             "is_notification": True,
                                             "notification_type": tool_result.get("notification_type", "features")
                                         }
+                                        
+                                        print(f"Notification data to be yielded: {notification_data}")
+                                        print("==========================================\n\n")
+                                        
                                         # Use the message_to_agent as the result content
                                         result_content = str(tool_result.get("message_to_agent", ""))
+                                        print(f"\n\n\n\nResult content: {result_content}")
                                     else:
                                         # Normal case without notification or when tool_result is a string
                                         if isinstance(tool_result, str):
                                             result_content = tool_result
-                                        else:
+                                        elif isinstance(tool_result, dict):
                                             result_content = str(tool_result.get("message_to_agent", ""))
+                                        else:
+                                            # If tool_result is neither a string nor a dict
+                                            result_content = str(tool_result) if tool_result is not None else ""
                                     
                                     print(f"[OpenAIProvider Debug] Tool Success. Result: {result_content}")
                                 except json.JSONDecodeError as e:
@@ -167,12 +209,14 @@ class OpenAIProvider(AIProvider):
                                 tool_results_messages.append({
                                     "role": "tool",
                                     "tool_call_id": tool_call_id,
-                                    "name": tool_call_name,
-                                    "content": result_content
+                                    "content": f"Tool call {tool_call_name}() completed. {result_content} \nProceed to next step."
                                 })
                                 
                                 # If we have notification data, yield it to the consumer
                                 if notification_data:
+                                    print("\n\n=== YIELDING NOTIFICATION DATA TO CONSUMER ===")
+                                    print(f"Notification JSON: {json.dumps(notification_data)}")
+                                    print("============================================\n\n")
                                     yield json.dumps(notification_data)
                                 
                             current_messages.extend(tool_results_messages) # Add tool results

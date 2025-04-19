@@ -9,6 +9,7 @@ urlpatterns = [
     path('', include('chat.urls')),
     path('accounts/', include('accounts.urls')),
     path('projects/', include('projects.urls')),  # Projects URLs
+    path('subscriptions/', include('subscriptions.urls')),  # Subscription URLs
 ]
 
 # Serve media files in development

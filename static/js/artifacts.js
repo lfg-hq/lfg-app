@@ -48,6 +48,16 @@ document.addEventListener('DOMContentLoaded', function() {
         // Update app container class to adjust chat container
         if (isExpanded) {
             appContainer.classList.add('artifacts-expanded');
+            
+            // When opening the panel, load data for the currently active tab
+            const activeTab = document.querySelector('.tab-button.active');
+            if (activeTab) {
+                const tabId = activeTab.getAttribute('data-tab');
+                console.log(`[ArtifactsPanel] Panel opened, loading data for active tab: ${tabId}`);
+                if (window.switchTab) {
+                    window.switchTab(tabId);
+                }
+            }
         } else {
             appContainer.classList.remove('artifacts-expanded');
         }
@@ -92,6 +102,65 @@ document.addEventListener('DOMContentLoaded', function() {
         
         e.preventDefault();
     });
+    
+    // Set up tab switching event listeners - direct implementation
+    document.querySelectorAll('.tab-button').forEach(button => {
+        button.addEventListener('click', function() {
+            const tabId = this.getAttribute('data-tab');
+            
+            // If switchTab is available in the window object, use it
+            if (window.switchTab) {
+                window.switchTab(tabId);
+            } else {
+                // Otherwise, use a simple tab switching implementation
+                const tabButtons = document.querySelectorAll('.tab-button');
+                const tabPanes = document.querySelectorAll('.tab-pane');
+                
+                // Remove active class from all buttons and panes
+                tabButtons.forEach(btn => btn.classList.remove('active'));
+                tabPanes.forEach(pane => pane.classList.remove('active'));
+                
+                // Add active class to the selected button and pane
+                this.classList.add('active');
+                const selectedPane = document.getElementById(tabId);
+                if (selectedPane) {
+                    selectedPane.classList.add('active');
+                }
+            }
+        });
+    });
+    
+    // Function to handle markdown rendering of content
+    function renderMarkdownContent() {
+        if (typeof marked !== 'undefined') {
+            // Find all markdown-content elements in the artifacts panel
+            const markdownElements = artifactsPanel.querySelectorAll('.markdown-content');
+            
+            markdownElements.forEach(element => {
+                const rawContent = element.getAttribute('data-raw-content');
+                if (rawContent) {
+                    // Render the raw content as markdown
+                    element.innerHTML = marked.parse(rawContent);
+                }
+            });
+        }
+    }
+    
+    // Event listener for when content is dynamically added to the panel
+    const observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            if (mutation.type === 'childList') {
+                // Check if any new markdown content was added
+                renderMarkdownContent();
+            }
+        });
+    });
+    
+    // Start observing changes to the artifacts content
+    const artifactsContent = document.querySelector('.artifacts-content');
+    if (artifactsContent) {
+        observer.observe(artifactsContent, { childList: true, subtree: true });
+    }
     
     function handleMouseMove(e) {
         if (!isResizing) return;
@@ -324,11 +393,60 @@ document.addEventListener('DOMContentLoaded', function() {
         
         /**
          * Toggle the artifacts panel visibility
+         * If forceOpen is true, ensures the panel is opened
          */
-        toggle: function() {
-            if (artifactsButton) {
-                artifactsButton.click();
+        toggle: function(forceOpen) {
+            console.log('[ArtifactsPanel] Toggle called with forceOpen:', forceOpen);
+            
+            // Get current state
+            const isCurrentlyExpanded = artifactsPanel.classList.contains('expanded');
+            console.log('[ArtifactsPanel] Current panel state - expanded:', isCurrentlyExpanded);
+            
+            // Determine if we should open, close, or toggle
+            let shouldBeExpanded;
+            if (forceOpen === true) {
+                shouldBeExpanded = true; // Force open
+            } else if (forceOpen === false) {
+                shouldBeExpanded = false; // Force close
+            } else {
+                shouldBeExpanded = !isCurrentlyExpanded; // Toggle
             }
+            
+            console.log('[ArtifactsPanel] Should be expanded:', shouldBeExpanded);
+            
+            // Apply the state directly
+            if (shouldBeExpanded) {
+                // Open the panel
+                artifactsPanel.classList.add('expanded');
+                appContainer.classList.add('artifacts-expanded');
+                artifactsButton.classList.add('active');
+                
+                // Update chat container
+                updateChatContainerPosition(true);
+                
+                // When opening the panel, load data for the currently active tab
+                const activeTab = document.querySelector('.tab-button.active');
+                if (activeTab) {
+                    const tabId = activeTab.getAttribute('data-tab');
+                    console.log(`[ArtifactsPanel] Panel opened, loading data for active tab: ${tabId}`);
+                    loadTabData(tabId);
+                }
+                
+                console.log('[ArtifactsPanel] Panel opened');
+            } else {
+                // Close the panel
+                artifactsPanel.classList.remove('expanded');
+                appContainer.classList.remove('artifacts-expanded');
+                artifactsButton.classList.remove('active');
+                
+                // Update chat container
+                updateChatContainerPosition(false);
+                
+                console.log('[ArtifactsPanel] Panel closed');
+            }
+            
+            // Store state in localStorage
+            localStorage.setItem('artifacts_expanded', shouldBeExpanded);
         }
     };
 
@@ -337,6 +455,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const tabPanes = document.querySelectorAll('.tab-pane');
 
     function switchTab(tabId) {
+        console.log(`[ArtifactsPanel] Switching to tab: ${tabId}`);
+        
         // Remove active class from all buttons and panes
         tabButtons.forEach(button => button.classList.remove('active'));
         tabPanes.forEach(pane => pane.classList.remove('active'));
@@ -348,7 +468,69 @@ document.addEventListener('DOMContentLoaded', function() {
         if (activeButton && activePane) {
             activeButton.classList.add('active');
             activePane.classList.add('active');
+            
+            // Automatically load data when switching to certain tabs
+            loadTabData(tabId);
         }
+    }
+    
+    // Function to load data for specific tabs
+    function loadTabData(tabId) {
+        console.log(`[ArtifactsPanel] loadTabData called for tab: ${tabId}`);
+        
+        // Get the current project ID from the URL or data attribute
+        const projectId = getCurrentProjectId();
+        console.log(`[ArtifactsPanel] Current project ID: ${projectId}`);
+        
+        if (!projectId) {
+            console.warn('[ArtifactsPanel] No project ID found, cannot load tab data');
+            return;
+        }
+        
+        // Load different data based on tab ID
+        switch (tabId) {
+            case 'features':
+                if (window.ArtifactsLoader && typeof window.ArtifactsLoader.loadFeatures === 'function') {
+                    window.ArtifactsLoader.loadFeatures(projectId);
+                } else {
+                    console.warn('[ArtifactsPanel] ArtifactsLoader.loadFeatures not found');
+                }
+                break;
+            case 'personas':
+                if (window.ArtifactsLoader && typeof window.ArtifactsLoader.loadPersonas === 'function') {
+                    window.ArtifactsLoader.loadPersonas(projectId);
+                } else {
+                    console.warn('[ArtifactsPanel] ArtifactsLoader.loadPersonas not found');
+                }
+                break;
+            case 'tickets':
+                if (window.ArtifactsLoader && typeof window.ArtifactsLoader.loadTickets === 'function') {
+                    window.ArtifactsLoader.loadTickets(projectId);
+                } else {
+                    console.warn('[ArtifactsPanel] ArtifactsLoader.loadTickets not found');
+                }
+                break;
+            // Add more cases as needed for other tabs
+        }
+    }
+    
+    // Helper function to get current project ID from URL or path
+    function getCurrentProjectId() {
+        // Try to get project ID from URL first
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlProjectId = urlParams.get('project_id');
+        
+        if (urlProjectId) {
+            return urlProjectId;
+        }
+        
+        // Then try from path (format: /chat/project/{id}/)
+        const pathMatch = window.location.pathname.match(/\/chat\/project\/(\d+)\//);
+        if (pathMatch && pathMatch[1]) {
+            return pathMatch[1];
+        }
+        
+        return null;
     }
 
     // Make switchTab function available globally

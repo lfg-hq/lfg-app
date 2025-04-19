@@ -1,0 +1,140 @@
+/* Function call indicator styles - SUBTLE VERSION */
+.function-call-indicator, .function-mini-indicator {
+    display: flex;
+    align-items: center;
+    background-color: rgba(45, 55, 72, 0.5); /* Subtle dark blue-gray */
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin: 8px 0;
+    max-width: fit-content;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+    border: none;
+    color: #e2e8f0;
+}
+
+/* Mini indicator seen in HTML */
+.function-mini-indicator {
+    background-color: rgba(45, 55, 72, 0.5) !important;
+    color: #e2e8f0 !important;
+    font-weight: normal !important;
+    padding: 3px 8px !important;
+    border-radius: 3px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    font-size: 0.75rem !important;
+}
+
+.function-mini-indicator.show {
+    display: inline-flex !important;
+}
+
+/* Separator styling */
+.function-call-separator {
+    border-top: 1px dotted rgba(255, 255, 255, 0.15);
+    margin: 6px 0;
+    width: 100%;
+}
+
+.function-call-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    border-top: 2px solid #cbd5e1;
+    border-radius: 50%;
+    margin-right: 8px;
+    animation: spin 1s linear infinite;
+}
+
+.function-call-text {
+    display: flex;
+    align-items: center;
+}
+
+.function-name {
+    font-family: monospace;
+    font-weight: normal;
+    color: #e2e8f0;
+    font-size: 0.8rem;
+    letter-spacing: 0.25px;
+}
+
+.function-status {
+    display: none; /* Hide status text */
+}
+
+/* Function-specific styles */
+.function-features .function-call-indicator,
+.function-features .function-mini-indicator {
+    background-color: rgba(91, 33, 182, 0.3) !important; /* Subtle purple */
+    border-left: 2px solid #a78bfa !important;
+}
+
+.function-personas .function-call-indicator,
+.function-personas .function-mini-indicator {
+    background-color: rgba(157, 23, 77, 0.3) !important; /* Subtle pink */
+    border-left: 2px solid #f472b6 !important;
+}
+
+/* Success indicator styles */
+.function-call-success {
+    display: flex;
+    align-items: center;
+    background-color: rgba(6, 78, 59, 0.3) !important; /* Subtle green */
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin: 8px 0;
+    max-width: fit-content;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+    border-left: 2px solid #34d399 !important;
+    color: #e2e8f0 !important;
+}
+
+.function-call-success.fade-out {
+    opacity: 0;
+}
+
+.function-call-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    background-color: rgba(16, 185, 129, 0.3);
+    color: #e2e8f0;
+    border-radius: 50%;
+    margin-right: 8px;
+    font-weight: normal;
+    font-size: 0.7rem;
+}
+
+.function-result {
+    font-size: 0.8rem;
+    color: #e2e8f0;
+}
+
+/* Type-specific success styles */
+.function-features .function-call-success {
+    background-color: rgba(91, 33, 182, 0.3) !important;
+    border-left: 2px solid #a78bfa !important;
+}
+
+.function-features .function-call-icon {
+    background-color: rgba(139, 92, 246, 0.3);
+    color: #e2e8f0;
+}
+
+.function-personas .function-call-success {
+    background-color: rgba(157, 23, 77, 0.3) !important;
+    border-left: 2px solid #f472b6 !important;
+}
+
+.function-personas .function-call-icon {
+    background-color: rgba(236, 72, 153, 0.3);
+    color: #e2e8f0;
+}
+
+/* Animation keyframes */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+} 

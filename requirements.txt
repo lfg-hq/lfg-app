@@ -14,3 +14,4 @@ daphne==4.0.0
 channels-redis==4.1.0
 websockets==15.0.1
 google-genai==1.9.0
+stripe==7.9.0
