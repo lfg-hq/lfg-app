@@ -101,3 +101,13 @@ class ProjectTickets(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     
+class ProjectCodeGeneration(models.Model):
+    project = models.OneToOneField(Project, on_delete=models.CASCADE, related_name="code_generation")
+    folder_name = models.CharField(max_length=255, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return f"{self.project.name} - Code Generation Folder: {self.folder_name}"
+    
+    

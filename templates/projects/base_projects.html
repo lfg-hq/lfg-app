@@ -19,13 +19,13 @@
                 <div class="header-content">
                     <div class="header-left">
                         <div class="logo">
-                            <a href="{% url 'project_list' %}">
+                            <a href="{% url 'projects:project_list' %}">
                                 <span class="logo-text">LFG</span>
                                 <span class="logo-emoji">🚀🚀</span>
                             </a>
                         </div>
                         <nav class="main-nav">
-                            <a href="{% url 'project_list' %}" class="{% if request.resolver_match.url_name == 'project_list' %}active{% endif %}">Projects</a>
+                            <a href="{% url 'projects:project_list' %}" class="{% if request.resolver_match.url_name == 'project_list' %}active{% endif %}">Projects</a>
                             <a href="#">Dashboard</a>
                             <a href="#">Settings</a>
                         </nav>

@@ -411,13 +411,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
         try:
             # Get the event loop
             loop = asyncio.get_running_loop()
+            conversation_id = self.conversation.id if self.conversation else None
             
             # Create a function that will process each item from the generator
             def process_stream():
                 result = []
                 # We'll capture all chunks in one go, as the actual AI providers may not
                 # support cancellation mid-stream
-                for content in provider.generate_stream(messages, project_id):
+                for content in provider.generate_stream(messages, project_id, conversation_id):
                     result.append(content)
                     # We yield by appending to a result list, then returning it
                     # This approach avoids having to convert a generator to an async generator
@@ -609,7 +610,7 @@ the core functionalities, the design layout, etc.
         if not self.conversation:
             return []
             
-        messages = Message.objects.filter(conversation=self.conversation).order_by('-created_at')[:5]
+        messages = Message.objects.filter(conversation=self.conversation).order_by('-created_at')[:15]
         messages = reversed(list(messages))  # Convert to list and reverse
         print("\n\n Messages: ", messages)
         return [

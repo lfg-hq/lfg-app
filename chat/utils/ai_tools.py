@@ -23,6 +23,10 @@ get_prd = {
     "function": {
         "name": "get_prd",
         "description": "Call this function to check if PRD already exists. If it does, it will return the PRD",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
     }
 }
 
@@ -137,7 +141,103 @@ generate_tickets = {
     "function": {
         "name": "generate_tickets",
         "description": "Call this function to generate the tickets for the project",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
     }
 }
 
-tools = [save_prd, get_prd, save_features, save_personas, design_schema, generate_tickets]
+generate_code = {
+    "type": "function",
+    "function": {
+        "name": "generate_code",
+        "description": "Call this function to generate the code based on the user input",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "user_input": {
+                    "type": "string",
+                    "description": "This includes the code request provided by user, it could be related to building features, projects, fixing bugs, or analysing data"
+                }
+            },
+            "required": ["user_input"],
+            "additionalProperties": False,
+        }
+    }
+}
+
+write_code_file = {
+    "type": "function",
+    "function": {
+        "name": "write_code_file",
+        "description": "Write the source code files to app directory. This includes file path and the source-code in patch-diff mode for the files sent.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "files": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "file_path": {"type": "string", "description": "The path of the file to write to"},
+                            "source_code": {"type": "string", "description": "The source code of the file in patch-diff mode"},
+                        },
+                        "required": ["file_path", "source_code"]
+                    }
+                }
+            },
+            "required": ["files"]
+        }
+    }
+}
+
+read_code_file = {
+    "type": "function",
+    "function": {
+        "name": "read_code_file",
+        "description": "Read the source code files from app directory. This includes file path",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "The path of the file to read from"},
+            },
+            "required": ["file_path"]
+        }
+    }
+}
+
+execute_command = {
+    "type": "function",
+    "function": {
+        "name": "execute_command",
+        "description": "The command that needs to be executed in the terminal. This includes either the command to fetch files, file directory tree, write code via git patch, execute commands, etc. ",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "commands": {"type": "string", "description": "The command that needs to be executed."},
+            },
+            "required": ["commands"]
+        }
+    }
+}
+
+start_server = {
+    "type": "function",
+    "function": {
+        "name": "start_server",
+        "description": "Start the server at port 8000 for backend applications or 3000 for frontend applications. Install dependencies if needed.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "container_port": {"type": "integer", "description": "The port number to run the server at"},
+                "start_server_command": {"type": "string", "description": "The command to run the server, or install dependencies, etc."}
+            },
+            "required": ["container_port", "start_server_command"]
+        }
+    }
+}
+
+# tools = [save_prd, get_prd, save_features, save_personas, design_schema, generate_tickets, write_code_file, read_code_file]
+
+tools = [execute_command, start_server]

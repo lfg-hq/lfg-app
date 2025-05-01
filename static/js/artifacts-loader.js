@@ -683,6 +683,85 @@ document.addEventListener('DOMContentLoaded', function() {
                         </div>
                     `;
                 });
+        },
+        
+        /**
+         * Load codebase explorer from the coding module for the current project
+         * @param {number} projectId - The ID of the current project
+         */
+        loadCodebase: function(projectId) {
+            console.log(`[ArtifactsLoader] loadCodebase called with project ID: ${projectId}`);
+            
+            if (!projectId) {
+                console.warn('[ArtifactsLoader] No project ID provided for loading codebase');
+                return;
+            }
+            
+            // Get codebase tab content element
+            const codebaseTab = document.getElementById('codebase');
+            if (!codebaseTab) {
+                console.warn('[ArtifactsLoader] Codebase tab element not found');
+                return;
+            }
+            
+            // Get codebase UI elements
+            const codebaseLoading = document.getElementById('codebase-loading');
+            const codebaseEmpty = document.getElementById('codebase-empty');
+            const codebaseFrameContainer = document.getElementById('codebase-frame-container');
+            const codebaseIframe = document.getElementById('codebase-iframe');
+            
+            if (!codebaseLoading || !codebaseEmpty || !codebaseFrameContainer || !codebaseIframe) {
+                console.warn('[ArtifactsLoader] Codebase UI elements not found');
+                return;
+            }
+            
+            // Show loading state
+            console.log('[ArtifactsLoader] Showing loading state for codebase');
+            codebaseLoading.style.display = 'block';
+            codebaseEmpty.style.display = 'none';
+            codebaseFrameContainer.style.display = 'none';
+            
+            // Get conversation ID using the helper function
+            const conversationId = getCurrentConversationId();
+            
+            // Build the editor URL with appropriate parameters
+            let editorUrl = `/coding/editor/?project_id=${projectId}`;
+            
+            // Add conversation ID if available
+            if (conversationId) {
+                editorUrl += `&conversation_id=${conversationId}`;
+                console.log(`[ArtifactsLoader] Including conversation ID: ${conversationId}`);
+            }
+            
+            console.log(`[ArtifactsLoader] Loading codebase explorer from URL: ${editorUrl}`);
+            
+            // Set up iframe event handlers
+            codebaseIframe.onload = function() {
+                // Hide loading and show iframe when loaded
+                codebaseLoading.style.display = 'none';
+                codebaseFrameContainer.style.display = 'block';
+                console.log('[ArtifactsLoader] Codebase iframe loaded successfully');
+            };
+            
+            codebaseIframe.onerror = function() {
+                // Show error state if loading fails
+                codebaseLoading.style.display = 'none';
+                codebaseEmpty.style.display = 'block';
+                codebaseEmpty.innerHTML = `
+                    <div class="error-state">
+                        <div class="error-state-icon">
+                            <i class="fas fa-exclamation-triangle"></i>
+                        </div>
+                        <div class="error-state-text">
+                            Error loading codebase explorer. Please try again.
+                        </div>
+                    </div>
+                `;
+                console.error('[ArtifactsLoader] Error loading codebase iframe');
+            };
+            
+            // Set the iframe source to load the editor
+            codebaseIframe.src = editorUrl;
         }
     };
     
@@ -749,6 +828,17 @@ document.addEventListener('DOMContentLoaded', function() {
             case 'tickets':
                 window.ArtifactsLoader.loadTickets(projectId);
                 break;
+            case 'codebase':
+                window.ArtifactsLoader.loadCodebase(projectId);
+                break;
+            case 'apps':
+                console.log('[ArtifactsLoader] Attempting to load app preview');
+                if (window.ArtifactsLoader.loadAppPreview) {
+                    window.ArtifactsLoader.loadAppPreview(projectId, null);
+                } else {
+                    console.warn('[ArtifactsLoader] loadAppPreview function not available');
+                }
+                break;
             // Add more cases as needed for other tabs
         }
     }
@@ -770,4 +860,19 @@ document.addEventListener('DOMContentLoaded', function() {
         // Try to get from stored value in localStorage
         return localStorage.getItem('current_project_id');
     }
+    
+    // Function to get current conversation ID from URL
+    function getCurrentConversationId() {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('conversation_id')) {
+            return urlParams.get('conversation_id');
+        }
+        return null;
+    }
+    
+    // Expose these functions globally for other modules to use
+    window.ArtifactsHelper = {
+        getCurrentProjectId: getCurrentProjectId,
+        getCurrentConversationId: getCurrentConversationId
+    };
 });

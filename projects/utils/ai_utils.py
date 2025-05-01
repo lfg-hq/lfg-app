@@ -388,3 +388,43 @@ def generate_tickets_per_feature(feature, personas, prd):
             return function_call.function.arguments
     # Fallback to content if no tool calls were made
     return message.content
+
+
+def generate_project_code(user_input):
+    """
+    Generate a code prompt for a project based on the user input.
+    """
+    print("Generate code prompt function called \n\n")
+    
+    client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+
+    system_prompt = """
+    You are CodeBot, an expert code generator for a web application. 
+    You will receive the user input for this project and generate the code for the project.
+
+    You will maintain an internal Readme file, which has the specs or features or user-request mapped to the code files that you will generate.
+    This readme file should first start with directory tree structure, with each files listed. Name this file as "ai_code.readme".
+    Note that this file is only for AI code generation and mapping the components. This is kind of useless to the user. 
+
+    Before generating the code, you will request this readme file "ai_code.readme". 
+
+    Get as much context as you can from the existing project if you need to.
+
+    You have two tools available:
+    - get_file(): to fetch the file from the storage directory.
+    - write_file(): to write the file to the storage directory. You will write the file in patch-diff mode. 
+
+    """
+
+    user_prompt = f"""
+    Here is the user input for this project:
+    {user_input}
+    """
+    
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+    )

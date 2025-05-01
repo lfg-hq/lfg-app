@@ -10,6 +10,7 @@ urlpatterns = [
     path('accounts/', include('accounts.urls')),
     path('projects/', include('projects.urls')),  # Projects URLs
     path('subscriptions/', include('subscriptions.urls')),  # Subscription URLs
+    path('coding/', include('coding.urls')),  # Coding URLs
 ]
 
 # Serve media files in development

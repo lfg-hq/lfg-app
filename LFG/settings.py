@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     'marketing',
     'projects',
     'subscriptions',
+    'coding',
 ]
 
 MIDDLEWARE = [
@@ -138,8 +139,12 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # CORS settings
 CORS_ALLOW_ALL_ORIGINS = True
 
+# Security settings
+X_FRAME_OPTIONS = 'SAMEORIGIN'  # Allow pages to be displayed in frames on the same origin
+
 # AI Provider Selection Feature
 AI_PROVIDER_DEFAULT = 'openai'  # Default provider 
+# AI_PROVIDER_DEFAULT = 'anthropic'  # Alternate provider 
 
 # Authentication URLs
 LOGIN_URL = '/accounts/login/'

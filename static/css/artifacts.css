@@ -1123,3 +1123,32 @@
         right: 0;
     }
 }
+
+/* Add styles for codebase tab */
+#codebase.tab-pane {
+    position: relative;
+    height: 100%;
+    overflow: hidden;
+}
+
+.codebase-container {
+    position: relative;
+    height: 100%;
+    overflow: hidden;
+}
+
+#codebase-iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    background-color: #1e1e1e;
+}
+
+.codebase-frame-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    overflow: hidden;
+}

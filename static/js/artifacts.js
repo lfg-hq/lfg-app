@@ -510,8 +510,76 @@ document.addEventListener('DOMContentLoaded', function() {
                     console.warn('[ArtifactsPanel] ArtifactsLoader.loadTickets not found');
                 }
                 break;
+            case 'codebase':
+                // Load codebase explorer in iframe
+                if (window.ArtifactsLoader && typeof window.ArtifactsLoader.loadCodebase === 'function') {
+                    window.ArtifactsLoader.loadCodebase(projectId);
+                } else {
+                    // Fallback to internal function if loader not available
+                    loadCodebaseExplorer(projectId);
+                }
+                break;
+            case 'apps':
+                if (window.ArtifactsLoader && typeof window.ArtifactsLoader.loadAppPreview === 'function') {
+                    console.log('[ArtifactsPanel] Loading app preview from artifacts.js');
+                    window.ArtifactsLoader.loadAppPreview(projectId, null);
+                } else {
+                    console.warn('[ArtifactsPanel] ArtifactsLoader.loadAppPreview not found');
+                }
+                break;
             // Add more cases as needed for other tabs
         }
+    }
+    
+    // Function to load the codebase explorer in an iframe
+    function loadCodebaseExplorer(projectId) {
+        console.log(`[ArtifactsPanel] Loading codebase explorer for project ID: ${projectId}`);
+        
+        const codebaseTab = document.getElementById('codebase');
+        const codebaseLoading = document.getElementById('codebase-loading');
+        const codebaseEmpty = document.getElementById('codebase-empty');
+        const codebaseFrameContainer = document.getElementById('codebase-frame-container');
+        const codebaseIframe = document.getElementById('codebase-iframe');
+        
+        if (!codebaseTab || !codebaseLoading || !codebaseEmpty || !codebaseFrameContainer || !codebaseIframe) {
+            console.warn('[ArtifactsPanel] Codebase UI elements not found');
+            return;
+        }
+        
+        // Show loading state
+        codebaseLoading.style.display = 'block';
+        codebaseEmpty.style.display = 'none';
+        codebaseFrameContainer.style.display = 'none';
+        
+        // Set the iframe source to the coding editor page
+        const editorUrl = `/coding/editor/?project_id=${projectId}`;
+        console.log(`[ArtifactsPanel] Loading codebase from URL: ${editorUrl}`);
+        
+        codebaseIframe.onload = function() {
+            // Hide loading and show iframe when loaded
+            codebaseLoading.style.display = 'none';
+            codebaseFrameContainer.style.display = 'block';
+            console.log('[ArtifactsPanel] Codebase iframe loaded successfully');
+        };
+        
+        codebaseIframe.onerror = function() {
+            // Show error state if loading fails
+            codebaseLoading.style.display = 'none';
+            codebaseEmpty.style.display = 'block';
+            codebaseEmpty.innerHTML = `
+                <div class="error-state">
+                    <div class="error-state-icon">
+                        <i class="fas fa-exclamation-triangle"></i>
+                    </div>
+                    <div class="error-state-text">
+                        Error loading codebase explorer. Please try again.
+                    </div>
+                </div>
+            `;
+            console.error('[ArtifactsPanel] Error loading codebase iframe');
+        };
+        
+        codebaseIframe.src = editorUrl;
     }
     
     // Helper function to get current project ID from URL or path
