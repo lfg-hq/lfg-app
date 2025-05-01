@@ -131,6 +131,8 @@ env.prod.sh
 .byebug_history
 /vendor/bundle
 
+venv/
+
 # Docker
 .dockerignore
 docker-compose.override.yml
