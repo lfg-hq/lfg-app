@@ -4,6 +4,7 @@ from django.http import JsonResponse
 from django.contrib import messages
 from .models import Project, ProjectFeature, ProjectPersona, ProjectPRD, ProjectDesignSchema, ProjectTickets
 from django.views.decorators.http import require_POST
+from django.core.exceptions import PermissionDenied
 
 # Create your views here.
 
@@ -187,4 +188,27 @@ def project_tickets_api(request, project_id):
         })
     
     return JsonResponse({'tickets': tickets_list})
+
+@login_required
+def project_terminal(request, project_id):
+    """
+    View for the terminal page of a project.
+    This can either be a local terminal or a connection to a Kubernetes pod.
+    """
+    project = get_object_or_404(Project, id=project_id)
+    
+    # Check if the user has permission to access this project
+    if project.owner != request.user:
+        raise PermissionDenied("You don't have permission to access this project.")
+    
+    # You can add pod information here if you have Kubernetes integration
+    pod = None
+    
+    context = {
+        'project': project,
+        'pod': pod,
+        'active_tab': 'terminal',
+    }
+    
+    return render(request, 'projects/terminal.html', context)
 

@@ -133,6 +133,10 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
+# File storage for chat attachments
+FILE_STORAGE_PATH = os.path.join(MEDIA_ROOT, 'file_storage')
+os.makedirs(FILE_STORAGE_PATH, exist_ok=True)
+
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -145,6 +149,14 @@ X_FRAME_OPTIONS = 'SAMEORIGIN'  # Allow pages to be displayed in frames on the s
 # AI Provider Selection Feature
 AI_PROVIDER_DEFAULT = 'openai'  # Default provider 
 # AI_PROVIDER_DEFAULT = 'anthropic'  # Alternate provider 
+
+# Kubernetes SSH server settings
+K8S_SSH_HOST = os.environ.get('K8S_SSH_HOST', '127.0.0.1')
+K8S_SSH_PORT = int(os.environ.get('K8S_SSH_PORT', 22))
+K8S_SSH_USERNAME = os.environ.get('K8S_SSH_USERNAME', 'root')
+K8S_SSH_KEY_FILE = os.environ.get('K8S_SSH_KEY_FILE', os.path.expanduser('~/.ssh/id_rsa'))
+K8S_SSH_KEY_STRING = os.environ.get('K8S_SSH_KEY_STRING', None)  # SSH private key as a string
+K8S_SSH_KEY_PASSPHRASE = os.environ.get('K8S_SSH_KEY_PASSPHRASE', None)
 
 # Authentication URLs
 LOGIN_URL = '/accounts/login/'

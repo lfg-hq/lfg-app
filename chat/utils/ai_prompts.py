@@ -108,5 +108,3 @@ Whenever the user wants to **generate, modify, or analyse code/data**, act as a 
 **(End of prompt)**
 
 """
-
-# IMPORTANT:: you are executing the commands in a docker. So please wrap the commands in docker exec commands. `/bin/sh -c \"{Command}\"`

@@ -24,8 +24,8 @@ class AIProvider:
         # provider_name = "anthropic"
         providers = {
             'openai': OpenAIProvider,
-            'anthropic': AnthropicProvider,
-            'google': GoogleAIProvider
+            # 'anthropic': AnthropicProvider,
+            # 'google': GoogleAIProvider
         }
         return providers.get(provider_name, OpenAIProvider)()
     
@@ -202,7 +202,7 @@ class OpenAIProvider(AIProvider):
                                         
                                         # Use the message_to_agent as the result content
                                         result_content = str(tool_result.get("message_to_agent", ""))
-                                        print(f"\n\n\n\nResult content: {result_content}")
+                                        # print(f"\n\n\n\nResult content: {result_content}")
                                     else:
                                         # Normal case without notification or when tool_result is a string
                                         if isinstance(tool_result, str):
@@ -232,7 +232,7 @@ class OpenAIProvider(AIProvider):
                                     "content": f"Tool call {tool_call_name}() completed. {result_content}."
                                 })
 
-                                print("\n\n\n\nTool Results Messages: ", tool_results_messages)
+                                # print("\n\n\n\nTool Results Messages: ", tool_results_messages)
                                 
                                 # If we have notification data, yield it to the consumer
                                 if notification_data:
@@ -268,475 +268,475 @@ class OpenAIProvider(AIProvider):
                 return # Exit generator on critical error
 
 
-class AnthropicProvider(AIProvider):
-    """Anthropic Claude provider implementation"""
+# class AnthropicProvider(AIProvider):
+#     """Anthropic Claude provider implementation"""
     
-    def __init__(self):
-        api_key = os.getenv('ANTHROPIC_API_KEY')
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY environment variable is not set. Please check your .env file.")
+#     def __init__(self):
+#         api_key = os.getenv('ANTHROPIC_API_KEY')
+#         if not api_key:
+#             raise ValueError("ANTHROPIC_API_KEY environment variable is not set. Please check your .env file.")
         
-        self.client = anthropic.Anthropic(api_key=api_key)
-        self.model = "claude-3-7-sonnet-20250219"
+#         self.client = anthropic.Anthropic(api_key=api_key)
+#         self.model = "claude-3-7-sonnet-20250219"
     
-    def convert_openai_to_anthropic_tools(self, openai_tools):
-        """Clean conversion from OpenAI tool format to Anthropic tool format"""
-        anthropic_tools = []
+#     def convert_openai_to_anthropic_tools(self, openai_tools):
+#         """Clean conversion from OpenAI tool format to Anthropic tool format"""
+#         anthropic_tools = []
         
-        for tool in openai_tools:
-            if tool.get("type") == "function":
-                function_def = tool["function"]
-                function_name = function_def["name"]
+#         for tool in openai_tools:
+#             if tool.get("type") == "function":
+#                 function_def = tool["function"]
+#                 function_name = function_def["name"]
                 
-                # Create proper Anthropic schema
-                input_schema = function_def.get("parameters", {}).copy()
+#                 # Create proper Anthropic schema
+#                 input_schema = function_def.get("parameters", {}).copy()
                 
-                # Ensure schema has type at top level
-                if "type" not in input_schema:
-                    input_schema["type"] = "object"
+#                 # Ensure schema has type at top level
+#                 if "type" not in input_schema:
+#                     input_schema["type"] = "object"
                 
-                # Create Anthropic tool format
-                anthropic_tool = {
-                    "name": function_name,
-                    "description": function_def.get("description", ""),
-                    "input_schema": input_schema
-                }
+#                 # Create Anthropic tool format
+#                 anthropic_tool = {
+#                     "name": function_name,
+#                     "description": function_def.get("description", ""),
+#                     "input_schema": input_schema
+#                 }
                 
-                anthropic_tools.append(anthropic_tool)
+#                 anthropic_tools.append(anthropic_tool)
         
-        return anthropic_tools
+#         return anthropic_tools
     
-    def convert_messages_to_anthropic_format(self, messages):
-        """Convert OpenAI message format to Anthropic message format"""
-        anthropic_messages = []
-        system_message = None
+#     def convert_messages_to_anthropic_format(self, messages):
+#         """Convert OpenAI message format to Anthropic message format"""
+#         anthropic_messages = []
+#         system_message = None
         
-        for message in messages:
-            role = message.get("role")
-            content = message.get("content", "")
+#         for message in messages:
+#             role = message.get("role")
+#             content = message.get("content", "")
             
-            if role == "system":
-                system_message = content
-            elif role == "user":
-                anthropic_messages.append({"role": "user", "content": content})
-            elif role == "assistant":
-                if "tool_calls" in message:
-                    # Handle tool calls - convert to Anthropic format
-                    if message.get("content"):
-                        # If there's text content before tool calls, add it as a separate message
-                        anthropic_messages.append({"role": "assistant", "content": message.get("content", "")})
+#             if role == "system":
+#                 system_message = content
+#             elif role == "user":
+#                 anthropic_messages.append({"role": "user", "content": content})
+#             elif role == "assistant":
+#                 if "tool_calls" in message:
+#                     # Handle tool calls - convert to Anthropic format
+#                     if message.get("content"):
+#                         # If there's text content before tool calls, add it as a separate message
+#                         anthropic_messages.append({"role": "assistant", "content": message.get("content", "")})
                     
-                    for tool_call in message.get("tool_calls", []):
-                        if tool_call.get("type") == "function":
-                            function = tool_call.get("function", {})
-                            try:
-                                tool_input = json.loads(function.get("arguments", "{}"))
-                            except json.JSONDecodeError:
-                                # Handle invalid JSON by creating an empty object
-                                print(f"[AnthropicProvider Warning] Failed to parse tool arguments: {function.get('arguments')}")
-                                tool_input = {}
+#                     for tool_call in message.get("tool_calls", []):
+#                         if tool_call.get("type") == "function":
+#                             function = tool_call.get("function", {})
+#                             try:
+#                                 tool_input = json.loads(function.get("arguments", "{}"))
+#                             except json.JSONDecodeError:
+#                                 # Handle invalid JSON by creating an empty object
+#                                 print(f"[AnthropicProvider Warning] Failed to parse tool arguments: {function.get('arguments')}")
+#                                 tool_input = {}
                                 
-                            anthropic_messages.append({
-                                "role": "assistant",
-                                "content": "",
-                                "tool_use": {
-                                    "name": function.get("name", ""),
-                                    "input": tool_input
-                                }
-                            })
-                else:
-                    anthropic_messages.append({"role": "assistant", "content": content})
-            elif role == "tool":
-                # Convert tool responses to user messages with clear indication that it's a tool result
-                tool_content = message.get("content", "")
-                tool_call_id = message.get("tool_call_id", "")
-                anthropic_messages.append({"role": "user", "content": f"Tool result for call {tool_call_id}: {tool_content}"})
+#                             anthropic_messages.append({
+#                                 "role": "assistant",
+#                                 "content": "",
+#                                 "tool_use": {
+#                                     "name": function.get("name", ""),
+#                                     "input": tool_input
+#                                 }
+#                             })
+#                 else:
+#                     anthropic_messages.append({"role": "assistant", "content": content})
+#             elif role == "tool":
+#                 # Convert tool responses to user messages with clear indication that it's a tool result
+#                 tool_content = message.get("content", "")
+#                 tool_call_id = message.get("tool_call_id", "")
+#                 anthropic_messages.append({"role": "user", "content": f"Tool result for call {tool_call_id}: {tool_content}"})
         
-        return anthropic_messages, system_message
+#         return anthropic_messages, system_message
     
-    def process_tool_use_stream(self, stream, project_id):
-        """Process Anthropic stream with tool use functionality"""
-        # Variables to track state
-        full_content = ""
-        tool_use_detected = False
-        current_tool_use = None
-        tool_calls = []
+#     def process_tool_use_stream(self, stream, project_id):
+#         """Process Anthropic stream with tool use functionality"""
+#         # Variables to track state
+#         full_content = ""
+#         tool_use_detected = False
+#         current_tool_use = None
+#         tool_calls = []
         
-        # Process stream chunks
-        for chunk in stream:
-            # Yield text content for immediate display
-            if hasattr(chunk, 'delta') and hasattr(chunk.delta, 'text') and chunk.delta.text:
-                content = chunk.delta.text
-                yield content
-                full_content += content
+#         # Process stream chunks
+#         for chunk in stream:
+#             # Yield text content for immediate display
+#             if hasattr(chunk, 'delta') and hasattr(chunk.delta, 'text') and chunk.delta.text:
+#                 content = chunk.delta.text
+#                 yield content
+#                 full_content += content
             
-            # Process tool use
-            if hasattr(chunk, 'delta') and hasattr(chunk.delta, 'tool_use'):
-                tool_use_detected = True
-                tool_delta = chunk.delta.tool_use
+#             # Process tool use
+#             if hasattr(chunk, 'delta') and hasattr(chunk.delta, 'tool_use'):
+#                 tool_use_detected = True
+#                 tool_delta = chunk.delta.tool_use
                 
-                # Initialize tool use info when we get a name
-                if tool_delta and hasattr(tool_delta, 'name') and tool_delta.name:
-                    current_tool_use = {
-                        "id": f"call_{len(tool_calls)}",
-                        "name": tool_delta.name,
-                        "input": {}
-                    }
-                    tool_calls.append({
-                        "id": current_tool_use["id"],
-                        "type": "function",
-                        "function": {
-                            "name": current_tool_use["name"],
-                            "arguments": "{}"
-                        }
-                    })
+#                 # Initialize tool use info when we get a name
+#                 if tool_delta and hasattr(tool_delta, 'name') and tool_delta.name:
+#                     current_tool_use = {
+#                         "id": f"call_{len(tool_calls)}",
+#                         "name": tool_delta.name,
+#                         "input": {}
+#                     }
+#                     tool_calls.append({
+#                         "id": current_tool_use["id"],
+#                         "type": "function",
+#                         "function": {
+#                             "name": current_tool_use["name"],
+#                             "arguments": "{}"
+#                         }
+#                     })
                 
-                # Update input as we receive chunks
-                if tool_delta and hasattr(tool_delta, 'input') and isinstance(tool_delta.input, dict):
-                    if current_tool_use:
-                        current_tool_use["input"].update(tool_delta.input)
+#                 # Update input as we receive chunks
+#                 if tool_delta and hasattr(tool_delta, 'input') and isinstance(tool_delta.input, dict):
+#                     if current_tool_use:
+#                         current_tool_use["input"].update(tool_delta.input)
                         
-                        # Update the arguments in tool_calls list
-                        for i, call in enumerate(tool_calls):
-                            if call["id"] == current_tool_use["id"]:
-                                tool_calls[i]["function"]["arguments"] = json.dumps(current_tool_use["input"])
+#                         # Update the arguments in tool_calls list
+#                         for i, call in enumerate(tool_calls):
+#                             if call["id"] == current_tool_use["id"]:
+#                                 tool_calls[i]["function"]["arguments"] = json.dumps(current_tool_use["input"])
             
-            # Handle message stop
-            if hasattr(chunk, 'type') and chunk.type == 'message_stop':
-                if tool_use_detected and tool_calls:
-                    # If we detected tool use, return the info for execution
-                    return {
-                        "finish_reason": "tool_calls",
-                        "content": full_content,
-                        "tool_calls": tool_calls
-                    }
-                else:
-                    # Normal completion without tool use
-                    return {
-                        "finish_reason": "stop",
-                        "content": full_content
-                    }
+#             # Handle message stop
+#             if hasattr(chunk, 'type') and chunk.type == 'message_stop':
+#                 if tool_use_detected and tool_calls:
+#                     # If we detected tool use, return the info for execution
+#                     return {
+#                         "finish_reason": "tool_calls",
+#                         "content": full_content,
+#                         "tool_calls": tool_calls
+#                     }
+#                 else:
+#                     # Normal completion without tool use
+#                     return {
+#                         "finish_reason": "stop",
+#                         "content": full_content
+#                     }
         
-        # Default return if stream ends unexpectedly
-        return {
-            "finish_reason": "stop",
-            "content": full_content
-        }
+#         # Default return if stream ends unexpectedly
+#         return {
+#             "finish_reason": "stop",
+#             "content": full_content
+#         }
     
-    def execute_tool_calls(self, tool_calls, project_id):
-        """Execute tool calls and return responses"""
-        tool_responses = []
-        notifications = []
+#     def execute_tool_calls(self, tool_calls, project_id):
+#         """Execute tool calls and return responses"""
+#         tool_responses = []
+#         notifications = []
         
-        for tool_call in tool_calls:
-            tool_call_id = tool_call["id"]
-            function_name = tool_call["function"]["name"]
-            arguments_str = tool_call["function"]["arguments"]
+#         for tool_call in tool_calls:
+#             tool_call_id = tool_call["id"]
+#             function_name = tool_call["function"]["name"]
+#             arguments_str = tool_call["function"]["arguments"]
             
-            print(f"[AnthropicProvider] Executing tool: {function_name} with arguments: {arguments_str}")
+#             print(f"[AnthropicProvider] Executing tool: {function_name} with arguments: {arguments_str}")
             
-            try:
-                # Handle empty arguments string by defaulting to an empty object
-                if not arguments_str.strip():
-                    arguments = {}
-                    print(f"[AnthropicProvider] Empty arguments string for {function_name}, defaulting to empty object")
-                else:
-                    arguments = json.loads(arguments_str)
-                tool_result = app_functions(function_name, arguments, project_id)
+#             try:
+#                 # Handle empty arguments string by defaulting to an empty object
+#                 if not arguments_str.strip():
+#                     arguments = {}
+#                     print(f"[AnthropicProvider] Empty arguments string for {function_name}, defaulting to empty object")
+#                 else:
+#                     arguments = json.loads(arguments_str)
+#                 tool_result = app_functions(function_name, arguments, project_id)
                 
-                # Format tool response
-                if tool_result is None:
-                    response_content = "The function completed with no result."
-                elif isinstance(tool_result, dict) and tool_result.get("is_notification") is True:
-                    # Handle notification
-                    response_content = str(tool_result.get("message_to_agent", ""))
-                    # Store notification for later yielding
-                    notifications.append({
-                        "is_notification": True,
-                        "notification_type": tool_result.get("notification_type", ""),
-                        "function_name": function_name
-                    })
-                else:
-                    # Standard response
-                    if isinstance(tool_result, str):
-                        response_content = tool_result
-                    elif isinstance(tool_result, dict):
-                        response_content = str(tool_result.get("message_to_agent", ""))
-                    else:
-                        response_content = str(tool_result)
+#                 # Format tool response
+#                 if tool_result is None:
+#                     response_content = "The function completed with no result."
+#                 elif isinstance(tool_result, dict) and tool_result.get("is_notification") is True:
+#                     # Handle notification
+#                     response_content = str(tool_result.get("message_to_agent", ""))
+#                     # Store notification for later yielding
+#                     notifications.append({
+#                         "is_notification": True,
+#                         "notification_type": tool_result.get("notification_type", ""),
+#                         "function_name": function_name
+#                     })
+#                 else:
+#                     # Standard response
+#                     if isinstance(tool_result, str):
+#                         response_content = tool_result
+#                     elif isinstance(tool_result, dict):
+#                         response_content = str(tool_result.get("message_to_agent", ""))
+#                     else:
+#                         response_content = str(tool_result)
                 
-                print(f"[AnthropicProvider] Tool success: {function_name}. Result length: {len(response_content)}")
+#                 print(f"[AnthropicProvider] Tool success: {function_name}. Result length: {len(response_content)}")
             
-            except json.JSONDecodeError as e:
-                response_content = f"Error parsing tool arguments: {str(e)}"
-                print(f"[AnthropicProvider Error] {response_content}")
-            except Exception as e:
-                response_content = f"Error executing tool {function_name}: {str(e)}"
-                print(f"[AnthropicProvider Error] {response_content}\n{traceback.format_exc()}")
+#             except json.JSONDecodeError as e:
+#                 response_content = f"Error parsing tool arguments: {str(e)}"
+#                 print(f"[AnthropicProvider Error] {response_content}")
+#             except Exception as e:
+#                 response_content = f"Error executing tool {function_name}: {str(e)}"
+#                 print(f"[AnthropicProvider Error] {response_content}\n{traceback.format_exc()}")
             
-            # Add tool response
-            tool_responses.append({
-                "role": "tool",
-                "tool_call_id": tool_call_id,
-                "content": response_content
-            })
+#             # Add tool response
+#             tool_responses.append({
+#                 "role": "tool",
+#                 "tool_call_id": tool_call_id,
+#                 "content": response_content
+#             })
         
-        return tool_responses, notifications
+#         return tool_responses, notifications
     
-    def generate_stream(self, messages, project_id):
-        """Generate streaming response from the AI provider with improved tool handling"""
-        current_messages = list(messages)  # Work on a copy
+#     def generate_stream(self, messages, project_id):
+#         """Generate streaming response from the AI provider with improved tool handling"""
+#         current_messages = list(messages)  # Work on a copy
         
-        while True:  # Loop to handle multi-turn tool calls
-            try:
-                print(f"[AnthropicProvider] Starting API call with {len(current_messages)} messages")
+#         while True:  # Loop to handle multi-turn tool calls
+#             try:
+#                 print(f"[AnthropicProvider] Starting API call with {len(current_messages)} messages")
                 
-                # Convert messages to Anthropic format
-                anthropic_messages, system_message = self.convert_messages_to_anthropic_format(current_messages)
+#                 # Convert messages to Anthropic format
+#                 anthropic_messages, system_message = self.convert_messages_to_anthropic_format(current_messages)
                 
-                # Convert tools to Anthropic format
-                anthropic_tools = self.convert_openai_to_anthropic_tools(ai_tools)
+#                 # Convert tools to Anthropic format
+#                 anthropic_tools = self.convert_openai_to_anthropic_tools(ai_tools)
                 
-                # Prepare request parameters
-                params = {
-                    "model": self.model,
-                    "messages": anthropic_messages,
-                    "max_tokens": 28000
-                }
+#                 # Prepare request parameters
+#                 params = {
+#                     "model": self.model,
+#                     "messages": anthropic_messages,
+#                     "max_tokens": 28000
+#                 }
                 
-                # Add system message if present
-                if system_message:
-                    params["system"] = system_message
+#                 # Add system message if present
+#                 if system_message:
+#                     params["system"] = system_message
                     
-                # Add tools if available
-                if anthropic_tools:
-                    params["tools"] = anthropic_tools
+#                 # Add tools if available
+#                 if anthropic_tools:
+#                     params["tools"] = anthropic_tools
                 
-                # Make API call with streaming
-                with self.client.messages.stream(**params) as stream:
-                    # Process stream chunks and collect results
-                    stream_processor = self.process_tool_use_stream(stream, project_id)
+#                 # Make API call with streaming
+#                 with self.client.messages.stream(**params) as stream:
+#                     # Process stream chunks and collect results
+#                     stream_processor = self.process_tool_use_stream(stream, project_id)
                     
-                    # Use a generator to process the streamed response
-                    stream_result = None
-                    for chunk_result in stream_processor:
-                        if isinstance(chunk_result, dict):
-                            # This is the final result data
-                            stream_result = chunk_result
-                        else:
-                            # This is streaming text content, pass it through
-                            yield chunk_result
+#                     # Use a generator to process the streamed response
+#                     stream_result = None
+#                     for chunk_result in stream_processor:
+#                         if isinstance(chunk_result, dict):
+#                             # This is the final result data
+#                             stream_result = chunk_result
+#                         else:
+#                             # This is streaming text content, pass it through
+#                             yield chunk_result
                     
-                    # If we didn't get a proper result, create a default one
-                    if not stream_result:
-                        print("[AnthropicProvider Warning] No stream result received")
-                        return
+#                     # If we didn't get a proper result, create a default one
+#                     if not stream_result:
+#                         print("[AnthropicProvider Warning] No stream result received")
+#                         return
                     
-                    # Check if tool calls were made
-                    if stream_result.get("finish_reason") == "tool_calls":
-                        tool_calls = stream_result.get("tool_calls", [])
-                        content = stream_result.get("content")
+#                     # Check if tool calls were made
+#                     if stream_result.get("finish_reason") == "tool_calls":
+#                         tool_calls = stream_result.get("tool_calls", [])
+#                         content = stream_result.get("content")
                         
-                        # Add assistant message with tool calls to the conversation
-                        assistant_message = {
-                            "role": "assistant",
-                            "tool_calls": tool_calls
-                        }
-                        if content:
-                            assistant_message["content"] = content
+#                         # Add assistant message with tool calls to the conversation
+#                         assistant_message = {
+#                             "role": "assistant",
+#                             "tool_calls": tool_calls
+#                         }
+#                         if content:
+#                             assistant_message["content"] = content
                         
-                        current_messages.append(assistant_message)
+#                         current_messages.append(assistant_message)
                         
-                        # Execute tools
-                        tool_responses, notifications = self.execute_tool_calls(tool_calls, project_id)
+#                         # Execute tools
+#                         tool_responses, notifications = self.execute_tool_calls(tool_calls, project_id)
                         
-                        # Yield any notifications to the consumer
-                        for notification in notifications:
-                            print(f"[AnthropicProvider] Yielding notification: {notification}")
-                            yield json.dumps(notification)
+#                         # Yield any notifications to the consumer
+#                         for notification in notifications:
+#                             print(f"[AnthropicProvider] Yielding notification: {notification}")
+#                             yield json.dumps(notification)
                         
-                        # Add tool responses to the conversation
-                        current_messages.extend(tool_responses)
+#                         # Add tool responses to the conversation
+#                         current_messages.extend(tool_responses)
                         
-                        # Continue to next API call in the multi-turn conversation
-                        continue
-                    else:
-                        # Conversation complete
-                        return
+#                         # Continue to next API call in the multi-turn conversation
+#                         continue
+#                     else:
+#                         # Conversation complete
+#                         return
                     
-            except Exception as e:
-                error_message = f"Error with Anthropic stream: {str(e)}"
-                print(f"[AnthropicProvider Critical Error] {error_message}\n{traceback.format_exc()}")
-                yield error_message
-                return
+#             except Exception as e:
+#                 error_message = f"Error with Anthropic stream: {str(e)}"
+#                 print(f"[AnthropicProvider Critical Error] {error_message}\n{traceback.format_exc()}")
+#                 yield error_message
+#                 return
 
 
-class GoogleAIProvider(AIProvider):
-    """Google AI provider implementation"""
+# class GoogleAIProvider(AIProvider):
+#     """Google AI provider implementation"""
     
-    def __init__(self):
-        api_key = os.getenv('GEMINI_API_KEY')
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY environment variable is not set. Please check your .env file.")
+#     def __init__(self):
+#         api_key = os.getenv('GEMINI_API_KEY')
+#         if not api_key:
+#             raise ValueError("GEMINI_API_KEY environment variable is not set. Please check your .env file.")
         
-        # Initialize the Google Generative AI client
-        # genai.configure(api_key=api_key)
-        self.client = genai.Client(api_key=api_key)
-        self.model_id = "gemini-2.5-pro-exp-03-25"  # Using Gemini 2.0 Flash as default
+#         # Initialize the Google Generative AI client
+#         # genai.configure(api_key=api_key)
+#         self.client = genai.Client(api_key=api_key)
+#         self.model_id = "gemini-2.5-pro-exp-03-25"  # Using Gemini 2.0 Flash as default
     
-    def generate_stream(self, messages, project_id):
-        try:
-            # Convert from OpenAI format to Google format
-            google_contents = []
-            system_message = None
+#     def generate_stream(self, messages, project_id):
+#         try:
+#             # Convert from OpenAI format to Google format
+#             google_contents = []
+#             system_message = None
             
-            # Extract system message if present
-            for m in messages:
-                if m["role"] == "system":
-                    system_message = m["content"]
-                    break
+#             # Extract system message if present
+#             for m in messages:
+#                 if m["role"] == "system":
+#                     system_message = m["content"]
+#                     break
             
-            # Convert remaining messages to Google format
-            for m in messages:
-                if m["role"] == "system":
-                    continue
+#             # Convert remaining messages to Google format
+#             for m in messages:
+#                 if m["role"] == "system":
+#                     continue
                 
-                role = "user" if m["role"] == "user" else "model"
-                if m["role"] == "user" and system_message and not google_contents:
-                    # Add system message as a preamble to the first user message
-                    google_contents.append({
-                        "role": role,
-                        "parts": [{"text": f"{system_message}\n\n{m['content']}"}]
-                    })
-                elif m["role"] == "assistant" and "tool_calls" in m:
-                    # Handle tool calls in the conversation history
-                    content_parts = []
-                    if m["content"]:
-                        content_parts.append({"text": m["content"]})
+#                 role = "user" if m["role"] == "user" else "model"
+#                 if m["role"] == "user" and system_message and not google_contents:
+#                     # Add system message as a preamble to the first user message
+#                     google_contents.append({
+#                         "role": role,
+#                         "parts": [{"text": f"{system_message}\n\n{m['content']}"}]
+#                     })
+#                 elif m["role"] == "assistant" and "tool_calls" in m:
+#                     # Handle tool calls in the conversation history
+#                     content_parts = []
+#                     if m["content"]:
+#                         content_parts.append({"text": m["content"]})
                     
-                    # Add function calls
-                    for tool_call in m.get("tool_calls", []):
-                        if "function" in tool_call:
-                            # Handle empty arguments by defaulting to an empty object
-                            arguments_str = tool_call["function"]["arguments"]
-                            if not arguments_str.strip():
-                                args = {}
-                                print(f"[GoogleAIProvider] Empty arguments string, defaulting to empty object")
-                            else:
-                                args = json.loads(arguments_str)
+#                     # Add function calls
+#                     for tool_call in m.get("tool_calls", []):
+#                         if "function" in tool_call:
+#                             # Handle empty arguments by defaulting to an empty object
+#                             arguments_str = tool_call["function"]["arguments"]
+#                             if not arguments_str.strip():
+#                                 args = {}
+#                                 print(f"[GoogleAIProvider] Empty arguments string, defaulting to empty object")
+#                             else:
+#                                 args = json.loads(arguments_str)
                                 
-                            function_call = {
-                                "name": tool_call["function"]["name"],
-                                "args": args
-                            }
-                            content_parts.append({"function_call": function_call})
+#                             function_call = {
+#                                 "name": tool_call["function"]["name"],
+#                                 "args": args
+#                             }
+#                             content_parts.append({"function_call": function_call})
                     
-                    google_contents.append({
-                        "role": role,
-                        "parts": content_parts
-                    })
-                else:
-                    google_contents.append({
-                        "role": role,
-                        "parts": [{"text": m["content"]}]
-                    })
+#                     google_contents.append({
+#                         "role": role,
+#                         "parts": content_parts
+#                     })
+#                 else:
+#                     google_contents.append({
+#                         "role": role,
+#                         "parts": [{"text": m["content"]}]
+#                     })
             
-            # Prepare configuration
-            config = {}
+#             # Prepare configuration
+#             config = {}
 
-            tools = ai_tools
+#             tools = ai_tools
             
-            # Add tools if provided
-            if tools:
-                google_tools = []
-                for tool in tools:
-                    if tool.get("type") == "function":
-                        function_def = tool["function"]
-                        # Convert parameters to uppercase types as required by Google API
-                        parameters = self._convert_json_schema_types(function_def.get("parameters", {}))
+#             # Add tools if provided
+#             if tools:
+#                 google_tools = []
+#                 for tool in tools:
+#                     if tool.get("type") == "function":
+#                         function_def = tool["function"]
+#                         # Convert parameters to uppercase types as required by Google API
+#                         parameters = self._convert_json_schema_types(function_def.get("parameters", {}))
                         
-                        function_declaration = FunctionDeclaration(
-                            name=function_def["name"],
-                            description=function_def.get("description", ""),
-                            parameters=parameters
-                        )
-                        google_tools.append(Tool(function_declarations=[function_declaration]))
+#                         function_declaration = FunctionDeclaration(
+#                             name=function_def["name"],
+#                             description=function_def.get("description", ""),
+#                             parameters=parameters
+#                         )
+#                         google_tools.append(Tool(function_declarations=[function_declaration]))
                 
-                if google_tools:
-                    config["tools"] = google_tools
+#                 if google_tools:
+#                     config["tools"] = google_tools
             
-            # Add temperature and other generation config options
-            # config["temperature"] = 0.7
-            config["max_output_tokens"] = 1024
+#             # Add temperature and other generation config options
+#             # config["temperature"] = 0.7
+#             config["max_output_tokens"] = 1024
             
-            # Create the generation config
-            generation_config = GenerateContentConfig(**config)
+#             # Create the generation config
+#             generation_config = GenerateContentConfig(**config)
             
-            # Get the model
-            # model = self.client.models.get(self.model_id)
-            client = self.client
+#             # Get the model
+#             # model = self.client.models.get(self.model_id)
+#             client = self.client
             
-            # Generate content with streaming
-            stream = client.models.generate_content_stream(
-                model=self.model_id,
-                contents=google_contents,
-                config=generation_config
-            )
+#             # Generate content with streaming
+#             stream = client.models.generate_content_stream(
+#                 model=self.model_id,
+#                 contents=google_contents,
+#                 config=generation_config
+#             )
             
-            # Process the streaming response
-            for chunk in stream:
-                # Check for text responses
-                if hasattr(chunk, 'candidates') and chunk.candidates:
-                    for candidate in chunk.candidates:
-                        if hasattr(candidate, 'content') and candidate.content:
-                            for part in candidate.content.parts:
-                                if hasattr(part, 'text') and part.text:
-                                    yield part.text
+#             # Process the streaming response
+#             for chunk in stream:
+#                 # Check for text responses
+#                 if hasattr(chunk, 'candidates') and chunk.candidates:
+#                     for candidate in chunk.candidates:
+#                         if hasattr(candidate, 'content') and candidate.content:
+#                             for part in candidate.content.parts:
+#                                 if hasattr(part, 'text') and part.text:
+#                                     yield part.text
                 
-                # Check for function calls
-                if hasattr(chunk, 'candidates') and chunk.candidates:
-                    for candidate in chunk.candidates:
-                        if hasattr(candidate, 'function_calls') and candidate.function_calls:
-                            for function_call in candidate.function_calls:
-                                yield json.dumps({
-                                    "tool_call": {
-                                        "name": function_call.name,
-                                        "arguments": function_call.args
-                                    }
-                                })
+#                 # Check for function calls
+#                 if hasattr(chunk, 'candidates') and chunk.candidates:
+#                     for candidate in chunk.candidates:
+#                         if hasattr(candidate, 'function_calls') and candidate.function_calls:
+#                             for function_call in candidate.function_calls:
+#                                 yield json.dumps({
+#                                     "tool_call": {
+#                                         "name": function_call.name,
+#                                         "arguments": function_call.args
+#                                     }
+#                                 })
         
-        except Exception as e:
-            yield f"Error with Google AI: {str(e)}"
+#         except Exception as e:
+#             yield f"Error with Google AI: {str(e)}"
     
-    def _convert_json_schema_types(self, schema):
-        """Convert JSON schema types to Google's format (uppercase types)"""
-        if not schema:
-            return schema
+#     def _convert_json_schema_types(self, schema):
+#         """Convert JSON schema types to Google's format (uppercase types)"""
+#         if not schema:
+#             return schema
             
-        result = schema.copy()
+#         result = schema.copy()
         
-        # Use dictionary mapping instead of if-elif chains
-        type_map = {
-            "object": "OBJECT",
-            "array": "ARRAY",
-            "string": "STRING",
-            "number": "NUMBER",
-            "integer": "INTEGER",
-            "boolean": "BOOLEAN",
-            "null": "NULL"
-        }
+#         # Use dictionary mapping instead of if-elif chains
+#         type_map = {
+#             "object": "OBJECT",
+#             "array": "ARRAY",
+#             "string": "STRING",
+#             "number": "NUMBER",
+#             "integer": "INTEGER",
+#             "boolean": "BOOLEAN",
+#             "null": "NULL"
+#         }
         
-        # Convert type values to uppercase
-        if "type" in result:
-            result["type"] = type_map.get(result["type"], result["type"])
+#         # Convert type values to uppercase
+#         if "type" in result:
+#             result["type"] = type_map.get(result["type"], result["type"])
         
-        # Recursively convert nested properties
-        if "properties" in result and isinstance(result["properties"], dict):
-            for prop_name, prop_schema in result["properties"].items():
-                result["properties"][prop_name] = self._convert_json_schema_types(prop_schema)
+#         # Recursively convert nested properties
+#         if "properties" in result and isinstance(result["properties"], dict):
+#             for prop_name, prop_schema in result["properties"].items():
+#                 result["properties"][prop_name] = self._convert_json_schema_types(prop_schema)
         
-        # Convert array item types
-        if "items" in result and isinstance(result["items"], dict):
-            result["items"] = self._convert_json_schema_types(result["items"])
+#         # Convert array item types
+#         if "items" in result and isinstance(result["items"], dict):
+#             result["items"] = self._convert_json_schema_types(result["items"])
         
-        return result 
+#         return result 

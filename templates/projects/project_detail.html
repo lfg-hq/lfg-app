@@ -18,6 +18,9 @@
             <a href="{% url 'create_conversation' project.id %}" class="btn btn-primary">
                 <i class="fas fa-comment"></i> New Chat
             </a>
+            <a href="{% url 'projects:project_terminal' project.id %}" class="btn btn-outline-secondary">
+                <i class="fas fa-terminal"></i> Terminal
+            </a>
             <a href="{% url 'projects:update_project' project.id %}" class="btn btn-outline">
                 <i class="fas fa-edit"></i> Edit
             </a>

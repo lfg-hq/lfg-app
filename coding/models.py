@@ -138,3 +138,98 @@ class DockerPortMapping(models.Model):
     
     def __str__(self):
         return f"{self.host_port}:{self.container_port} for {self.sandbox.container_name}"
+
+
+class KubernetesPod(models.Model):
+    """
+    Model to store information about Kubernetes pods for projects and conversations.
+    """
+    STATUS_CHOICES = (
+        ('created', 'Created'),
+        ('running', 'Running'),
+        ('stopped', 'Stopped'),
+        ('error', 'Error'),
+    )
+    
+    project_id = models.CharField(max_length=255, blank=True, null=True, 
+                                 help_text="Project identifier associated with this pod")
+    conversation_id = models.CharField(max_length=255, blank=True, null=True,
+                                      help_text="Conversation identifier associated with this pod")
+    pod_name = models.CharField(max_length=255, help_text="Kubernetes pod name")
+    namespace = models.CharField(max_length=255, help_text="Kubernetes namespace")
+    image = models.CharField(max_length=255, help_text="Container image used")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='created', 
+                             help_text="Current status of the pod")
+    resource_limits = models.JSONField(blank=True, null=True, 
+                                      help_text="Resource limits applied to the pod")
+    service_details = models.JSONField(blank=True, null=True,
+                                      help_text="Details of the associated services (ports, node ports, etc.)")
+    ssh_connection_details = models.JSONField(blank=True, null=True,
+                                            help_text="SSH connection details for the k8s host server")
+    # New fields for direct Kubernetes API access
+    cluster_host = models.CharField(max_length=255, blank=True, null=True,
+                                  help_text="Kubernetes cluster API server host")
+    kubeconfig = models.JSONField(blank=True, null=True,
+                                help_text="Kubernetes config as JSON for direct API access")
+    token = models.TextField(blank=True, null=True,
+                           help_text="Kubernetes API token for authentication")
+    created_at = models.DateTimeField(auto_now_add=True, help_text="When the pod was created")
+    updated_at = models.DateTimeField(auto_now=True, help_text="When the pod was last updated")
+    started_at = models.DateTimeField(blank=True, null=True, help_text="When the pod was started")
+    stopped_at = models.DateTimeField(blank=True, null=True, help_text="When the pod was stopped")
+    
+    class Meta:
+        indexes = [
+            models.Index(fields=['project_id']),
+            models.Index(fields=['conversation_id']),
+            models.Index(fields=['pod_name']),
+            models.Index(fields=['namespace']),
+            models.Index(fields=['status']),
+        ]
+        # Add uniqueness constraints
+        constraints = [
+            models.UniqueConstraint(
+                fields=['project_id'], 
+                condition=models.Q(conversation_id__isnull=True),
+                name='unique_project_pod'
+            ),
+            models.UniqueConstraint(
+                fields=['conversation_id'], 
+                condition=models.Q(project_id__isnull=True),
+                name='unique_conversation_pod'
+            ),
+            models.UniqueConstraint(
+                fields=['project_id', 'conversation_id'],
+                condition=models.Q(project_id__isnull=False, conversation_id__isnull=False),
+                name='unique_project_conversation_pod'
+            ),
+        ]
+        verbose_name = "Kubernetes Pod"
+        verbose_name_plural = "Kubernetes Pods"
+    
+    def __str__(self):
+        return f"Pod {self.pod_name} in {self.namespace} ({self.status})"
+    
+    def mark_as_running(self, pod_name=None, service_details=None):
+        """Mark the pod as running with the given details."""
+        self.status = 'running'
+        self.started_at = timezone.now()
+        
+        if pod_name:
+            self.pod_name = pod_name
+            
+        if service_details is not None:
+            self.service_details = service_details
+            
+        self.save()
+    
+    def mark_as_stopped(self):
+        """Mark the pod as stopped."""
+        self.status = 'stopped'
+        self.stopped_at = timezone.now()
+        self.save()
+    
+    def mark_as_error(self):
+        """Mark the pod as having an error."""
+        self.status = 'error'
+        self.save()

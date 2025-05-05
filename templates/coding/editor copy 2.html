@@ -776,17 +776,31 @@ function initializeTerminalWebSocket() {
         });
         
         // Connection closed
-        terminalSocket.addEventListener('close', (event) => {
-            terminalConnected = false;
-            appendToTerminal(`Terminal connection closed ${event.wasClean ? 'cleanly' : 'unexpectedly'} (code: ${event.code})`, 'out');
-            updateTerminalStatus('Disconnected', '#f14c4c');
-            
-            // Attempt to reconnect after a delay if connection was lost unexpectedly
-            if (!event.wasClean && event.code !== 1000 && event.code !== 1001) {
-                appendToTerminal('Attempting to reconnect in 5 seconds...', 'out');
-                setTimeout(initTerminalSocket, 5000);
-            }
-        });
+        socket.addEventListener('close', (event) => {
+    terminalConnected = false;
+    
+    if (event.code === 3000) {
+        // Application-specific error (SSH connection failure)
+        appendToTerminal("Connection closed due to SSH connection failure. Will not attempt to reconnect automatically.", 'error');
+        updateTerminalStatus('Failed', '#f14c4c');
+    } else if (event.code === 1011) {
+        appendToTerminal(`Terminal connection closed unexpectedly (code: ${event.code})`, 'error');
+        updateTerminalStatus('Disconnected', '#f14c4c');
+        
+        // Only retry a few times to prevent infinite reconnection loops
+        if (reconnectAttempts < 3) {
+            reconnectAttempts++;
+            appendToTerminal(`Attempting to reconnect in 5 seconds (attempt ${reconnectAttempts}/3)...`, 'out');
+            setTimeout(initTerminalSocket, 5000);
+        } else {
+            appendToTerminal("Maximum reconnection attempts reached. Please check that your pod is running and try connecting again manually.", 'error');
+        }
+    } else {
+        // Normal closure
+        appendToTerminal(`Terminal connection closed (code: ${event.code})`, 'out');
+        updateTerminalStatus('Disconnected', '#777');
+    }
+});
         
         // Connection error
         terminalSocket.addEventListener('error', (event) => {
@@ -950,16 +964,36 @@ function initializeTerminalWebSocket() {
         if (terminalSocket && terminalConnected) {
             terminalSocket.send(cmd + '\n');
         } else {
-            // Encourage connecting to WebSocket instead of using HTTP API
-            appendToTerminal('Terminal not connected. Type "connect" to establish a WebSocket connection.', 'error');
+            // Fallback to HTTP API
+            const requestData = { command: cmd };
+            if (projectId) requestData.project_id = projectId;
+            if (conversationId) requestData.conversation_id = conversationId;
+    
+            fetch('/coding/k8s/execute_command/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestData)
+            })
+            .then(r => r.json())
+            .then(res => {
+                if (res.error) {
+                    appendToTerminal(res.error, 'error');
+                    return;
+                }
+                if (res.stdout) appendToTerminal(res.stdout, 'out');
+                if (res.stderr) appendToTerminal(res.stderr, 'error');
+                
+                // Remind user they can use WebSocket for better experience
+                if (!terminalConnected) {
+                    appendToTerminal('Tip: Type "connect" to establish a live terminal connection', 'out');
+                }
+            })
+            .catch(err => appendToTerminal('Error executing command: ' + err, 'error'));
         }
     });
     
     // Auto-connect after a short delay
     setTimeout(() => {
-        // Display connection message
-        appendToTerminal('Automatically connecting to terminal...', 'out');
-        // Connect to the terminal WebSocket
         initTerminalSocket();
     }, 1000);
 }

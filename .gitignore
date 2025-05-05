@@ -108,6 +108,8 @@ jspm_packages/
 .env
 env.sh
 env.prod.sh
+.env*
+env*
 
 # Ruby/Rails specific
 *.gem

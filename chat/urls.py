@@ -9,6 +9,9 @@ urlpatterns = [
     path('api/conversations/<int:conversation_id>/', views.conversation_detail, name='conversation_detail_api'),
     # path('api/provider/', views.ai_provider, name='ai_provider'),
     path('api/toggle-sidebar/', views.toggle_sidebar, name='toggle_sidebar'),
+    # File upload API endpoints
+    path('api/files/upload/', views.upload_file, name='upload_file'),
+    path('api/conversations/<int:conversation_id>/files/', views.conversation_files, name='conversation_files'),
     # Note: The chat API endpoint (/api/chat/) has been removed
     # as it's now handled by the WebSocket consumer in chat/consumers.py
 ] 

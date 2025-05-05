@@ -64,12 +64,20 @@
             
             <div class="chat-input-container">
                 <form id="chat-form">
-                    <textarea 
-                        id="chat-input" 
-                        placeholder="Type your message here..." 
-                        rows="1"
-                        autofocus
-                    ></textarea>
+                    <div class="input-wrapper">
+                        <textarea 
+                            id="chat-input" 
+                            placeholder="Type your message here..." 
+                            rows="1"
+                            autofocus
+                        ></textarea>
+                        <div class="input-actions">
+                            <button type="button" id="file-upload-btn" class="action-btn" title="Upload file">
+                                <i class="fas fa-paperclip"></i>
+                            </button>
+                            <input type="file" id="file-upload-input" style="display: none">
+                        </div>
+                    </div>
                 </form>
             </div>
         </div>

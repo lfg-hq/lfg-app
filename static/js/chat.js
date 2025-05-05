@@ -92,10 +92,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault(); // Prevent the default behavior (new line)
             const message = this.value.trim();
-            if (message) {
+            if (message || window.attachedFile) {
                 sendMessage(message);
                 this.value = '';
                 this.style.height = 'auto';
+                
+                // Clear file attachment if exists
+                const fileAttachmentIndicator = document.querySelector('.input-file-attachment');
+                if (fileAttachmentIndicator) {
+                    fileAttachmentIndicator.remove();
+                }
             }
         }
     });
@@ -171,10 +177,16 @@ document.addEventListener('DOMContentLoaded', () => {
     chatForm.addEventListener('submit', (e) => {
         e.preventDefault();
         const message = chatInput.value.trim();
-        if (message) {
+        if (message || window.attachedFile) {
             sendMessage(message);
             chatInput.value = '';
             chatInput.style.height = 'auto';
+            
+            // Clear file attachment if exists
+            const fileAttachmentIndicator = document.querySelector('.input-file-attachment');
+            if (fileAttachmentIndicator) {
+                fileAttachmentIndicator.remove();
+            }
         }
     });
     
@@ -202,6 +214,204 @@ document.addEventListener('DOMContentLoaded', () => {
             socket.close();
         }
     });
+    
+    // File upload functionality
+    const fileUploadBtn = document.getElementById('file-upload-btn');
+    const fileUploadInput = document.getElementById('file-upload-input');
+    
+    if (fileUploadBtn && fileUploadInput) {
+        fileUploadBtn.addEventListener('click', () => {
+            fileUploadInput.click();
+        });
+        
+        fileUploadInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                console.log('%c FILE SELECTED', 'background: #44f; color: white; font-weight: bold;');
+                console.log('User selected file:', file.name, 'type:', file.type, 'size:', file.size);
+                
+                // Create a notification about the selected file
+                const fileInfo = document.createElement('div');
+                fileInfo.className = 'file-info';
+                fileInfo.textContent = `Selected file: ${file.name}`;
+                
+                // Show the selected file notification temporarily
+                const inputWrapper = document.querySelector('.input-wrapper');
+                inputWrapper.appendChild(fileInfo);
+                
+                // Simple animation to show file is ready
+                setTimeout(() => {
+                    fileInfo.classList.add('show');
+                }, 10);
+                
+                // Get current conversation ID - first check currentConversationId, then URL
+                let conversationId = currentConversationId;
+                if (!conversationId) {
+                    // Try to get it from URL
+                    const urlParams = new URLSearchParams(window.location.search);
+                    if (urlParams.has('conversation_id')) {
+                        conversationId = urlParams.get('conversation_id');
+                        console.log('Found conversation ID in URL:', conversationId);
+                        // Update current conversation ID
+                        currentConversationId = conversationId;
+                    }
+                }
+                
+                // File will be stored in this object until message is sent
+                const fileData = {
+                    file: file,
+                    name: file.name,
+                    type: file.type,
+                    size: file.size
+                };
+                
+                // Add a visual indicator in the input area
+                const fileAttachmentIndicator = document.createElement('div');
+                fileAttachmentIndicator.className = 'input-file-attachment';
+                
+                // Remove any existing indicators
+                const existingIndicator = document.querySelector('.input-file-attachment');
+                if (existingIndicator) {
+                    existingIndicator.remove();
+                }
+                
+                // IMPORTANT CHANGE: Always try to upload immediately, even without conversationId
+                // Show uploading status in the file attachment indicator
+                fileAttachmentIndicator.classList.add('uploading');
+                fileAttachmentIndicator.innerHTML = `
+                    <i class="fas fa-sync fa-spin"></i>
+                    <span>Uploading ${file.name}...</span>
+                `;
+                
+                // Add the indicator to the input area
+                inputWrapper.appendChild(fileAttachmentIndicator);
+                
+                // If no conversation exists yet, create one first via API
+                const uploadFile = async () => {
+                    try {
+                        // Check if we need to create a conversation first
+                        if (!conversationId) {
+                            console.log('%c CREATING NEW CONVERSATION', 'background: #f90; color: white; font-weight: bold;');
+                            
+                            // Get CSRF token
+                            const csrfToken = getCsrfToken();
+                            
+                            // Create a new conversation
+                            const createResponse = await fetch('/api/conversations/', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'X-CSRFToken': csrfToken,
+                                    'X-Requested-With': 'XMLHttpRequest'
+                                },
+                                body: JSON.stringify({
+                                    project_id: currentProjectId || null
+                                })
+                            });
+                            
+                            if (!createResponse.ok) {
+                                throw new Error('Failed to create conversation');
+                            }
+                            
+                            const conversationData = await createResponse.json();
+                            conversationId = conversationData.id;
+                            currentConversationId = conversationId;
+                            
+                            console.log('Created new conversation with ID:', conversationId);
+                            
+                            // Update URL with conversation ID
+                            const url = new URL(window.location);
+                            url.searchParams.set('conversation_id', conversationId);
+                            window.history.pushState({}, '', url);
+                        }
+                        
+                        // Now upload the file with the conversation ID
+                        console.log('%c UPLOADING FILE IMMEDIATELY', 'background: #f50; color: white; font-weight: bold;');
+                        console.log('Using conversation ID for upload:', conversationId);
+                        
+                        const fileResponse = await uploadFileToServer(file, conversationId);
+                        console.log('File uploaded immediately after selection, file_id:', fileResponse.id);
+                        
+                        // Update the indicator to show success
+                        fileAttachmentIndicator.classList.remove('uploading');
+                        fileAttachmentIndicator.classList.add('uploaded');
+                        fileAttachmentIndicator.innerHTML = `
+                            <i class="fas fa-check-circle"></i>
+                            <span>${file.name}</span>
+                            <button type="button" id="remove-file-btn" title="Remove file">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        `;
+                        
+                        // Store the file with the file_id in a global variable
+                        window.attachedFile = {
+                            file: file,
+                            name: file.name,
+                            type: file.type,
+                            size: file.size,
+                            id: fileResponse.id
+                        };
+                        
+                        console.log('Updated window.attachedFile with file_id:', window.attachedFile);
+                        
+                        // Add event listener to remove button
+                        const removeFileBtn = document.getElementById('remove-file-btn');
+                        if (removeFileBtn) {
+                            removeFileBtn.addEventListener('click', (e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                window.attachedFile = null;
+                                fileAttachmentIndicator.remove();
+                            });
+                        }
+                    } catch (error) {
+                        console.error('%c FILE UPLOAD ERROR', 'background: #f00; color: white; font-weight: bold;');
+                        console.error('Error details:', error);
+                        
+                        // Update the indicator to show error
+                        fileAttachmentIndicator.classList.remove('uploading');
+                        fileAttachmentIndicator.classList.add('error');
+                        fileAttachmentIndicator.innerHTML = `
+                            <i class="fas fa-exclamation-circle"></i>
+                            <span>Error: ${file.name}</span>
+                            <button type="button" id="remove-file-btn" title="Remove file">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        `;
+                        
+                        // Still store the file in a global variable, but without file_id
+                        window.attachedFile = fileData;
+                        
+                        // Add event listener to remove button
+                        const removeFileBtn = document.getElementById('remove-file-btn');
+                        if (removeFileBtn) {
+                            removeFileBtn.addEventListener('click', (e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                window.attachedFile = null;
+                                fileAttachmentIndicator.remove();
+                            });
+                        }
+                    }
+                };
+                
+                // Call the upload function immediately
+                uploadFile();
+                
+                // Focus on the input so the user can type their message
+                chatInput.focus();
+                
+                // Clear the file input to allow uploading the same file again
+                fileUploadInput.value = '';
+                
+                // Remove the notification after a short delay
+                setTimeout(() => {
+                    fileInfo.classList.remove('show');
+                    setTimeout(() => fileInfo.remove(), 300);
+                }, 3000);
+            }
+        });
+    }
     
     // Function to connect WebSocket and receive messages
     function connectWebSocket() {
@@ -865,23 +1075,135 @@ document.addEventListener('DOMContentLoaded', () => {
     function sendMessage(message) {
         console.log('sendMessage: Starting to send message:', message);
         
+        // Check if we have a message or an attached file
+        if (!message && !window.attachedFile) {
+            console.log('No message or file to send');
+            return;
+        }
+
         // Reset stop requested flag
         stopRequested = false;
         
-        // Add user message to chat
-        addMessageToChat('user', message);
+        // Get file data from the attached file (which may already have a file_id if it was uploaded)
+        let fileData = null;
+        if (window.attachedFile) {
+            console.log('Attached file found:', window.attachedFile);
+            fileData = {
+                name: window.attachedFile.name,
+                type: window.attachedFile.type,
+                size: window.attachedFile.size
+            };
+            
+            // If the file was already uploaded, it will have an id
+            if (window.attachedFile.id) {
+                fileData.id = window.attachedFile.id;
+            }
+        }
         
-        // Show typing indicator
-        const typingIndicator = document.createElement('div');
-        typingIndicator.className = 'typing-indicator';
-        typingIndicator.innerHTML = '<span></span><span></span><span></span>';
-        messageContainer.appendChild(typingIndicator);
-        console.log('sendMessage: Added typing indicator');
+        // Store a reference to the attached file and clear the global reference
+        const attachedFile = window.attachedFile;
+        window.attachedFile = null;
+        
+        // Clear the file attachment indicator
+        const fileAttachmentIndicator = document.querySelector('.input-file-attachment');
+        if (fileAttachmentIndicator) {
+            fileAttachmentIndicator.remove();
+        }
+        
+        // If there's an attached file that hasn't been uploaded yet, upload it first
+        if (attachedFile && attachedFile.file && !attachedFile.id) {
+            // Show typing indicator (shows we're doing something)
+            const typingIndicator = document.createElement('div');
+            typingIndicator.className = 'typing-indicator';
+            typingIndicator.innerHTML = '<span></span><span></span><span></span>';
+            messageContainer.appendChild(typingIndicator);
+            console.log('sendMessage: Added typing indicator for file upload');
+            
+            // Disable input while uploading file and waiting for response
+            chatInput.disabled = true;
+            
+            // Check for conversation ID - first in currentConversationId, then in URL
+            let conversationId = currentConversationId;
+            if (!conversationId) {
+                // Try to get it from URL
+                const urlParams = new URLSearchParams(window.location.search);
+                if (urlParams.has('conversation_id')) {
+                    conversationId = urlParams.get('conversation_id');
+                    console.log('Found conversation ID in URL:', conversationId);
+                    // Update current conversation ID
+                    currentConversationId = conversationId;
+                }
+            }
+            
+            if (conversationId) {
+                // If we have a conversation ID from anywhere, upload file first
+                console.log('Uploading file to conversation:', conversationId);
+                uploadFileToServer(attachedFile.file, conversationId)
+                    .then(fileResponse => {
+                        console.log('File uploaded successfully before message, file_id:', fileResponse.id);
+                        
+                        // Now add the file_id to the file data
+                        fileData.id = fileResponse.id;
+                        
+                        // Now actually add the user message to chat with file data
+                        addMessageToChat('user', message, fileData);
+                        
+                        // Proceed with sending the message with the file_id
+                        sendMessageToServer(message, fileData);
+                    })
+                    .catch(error => {
+                        console.error('Error uploading file before message:', error);
+                        
+                        // If file upload failed, still send the message without file_id
+                        addMessageToChat('user', message, fileData);
+                        sendMessageToServer(message, fileData);
+                        
+                        // Re-enable input
+                        chatInput.disabled = false;
+                    });
+            } else {
+                // If we still don't have a conversation ID, just send the message with file data
+                console.log('No conversation ID found. Sending message with file data.');
+                
+                // Add user message to chat with file data
+                addMessageToChat('user', message, fileData);
+                
+                // For simplicity, we'll just send message without file_id
+                // The server will need to handle creating both conversation and file
+                sendMessageToServer(message, fileData);
+                
+                // Remove typing indicator for file upload
+                const typingIndicator = document.querySelector('.typing-indicator');
+                if (typingIndicator) {
+                    typingIndicator.remove();
+                }
+            }
+        } else {
+            // Either no file is attached, or the file was already uploaded and has a file_id
+            
+            // Add user message to chat with file data (including file_id if available)
+            addMessageToChat('user', message, fileData);
+            
+            // Proceed with standard message sending
+            sendMessageToServer(message, fileData);
+        }
+    }
+    
+    // Function to handle the actual WebSocket message sending
+    function sendMessageToServer(message, fileData = null) {
+        // Show typing indicator if not already present
+        if (!document.querySelector('.typing-indicator')) {
+            const typingIndicator = document.createElement('div');
+            typingIndicator.className = 'typing-indicator';
+            typingIndicator.innerHTML = '<span></span><span></span><span></span>';
+            messageContainer.appendChild(typingIndicator);
+            console.log('sendMessageToServer: Added typing indicator');
+        }
         
         // Scroll to bottom
         scrollToBottom();
         
-        // Disable input while waiting for response
+        // Disable input while waiting for response (if not already disabled)
         chatInput.disabled = true;
         
         // Show stop button since we're about to start streaming
@@ -901,7 +1223,12 @@ document.addEventListener('DOMContentLoaded', () => {
             messageData.project_id = currentProjectId;
         }
         
-        console.log('sendMessage: Message data:', messageData);
+        // Add file data if provided
+        if (fileData) {
+            messageData.file = fileData;
+        }
+        
+        console.log('sendMessageToServer: Message data:', messageData);
         
         // Send via WebSocket if connected, otherwise queue
         if (isSocketConnected && socket && socket.readyState === WebSocket.OPEN) {
@@ -917,8 +1244,172 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
+    // Function to upload file to server via REST API
+    async function uploadFileToServer(file, conversationId = null, messageId = null) {
+        try {
+            console.log('%c FILE UPLOAD - Starting file upload process', 'background: #3a9; color: white; font-weight: bold;');
+            console.log('File to upload:', file);
+            console.log('Conversation ID:', conversationId);
+            console.log('Message ID:', messageId);
+            
+            // Validate that we have a conversation ID if required
+            if (!conversationId) {
+                console.warn('No conversation ID provided for file upload');
+                showFileNotification(`File upload requires a conversation ID`, 'error');
+                throw new Error('Conversation ID is required');
+            }
+            
+            // Show uploading notification
+            const notification = showFileNotification(`Uploading ${file.name}...`, 'uploading');
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('conversation_id', conversationId);
+            if (messageId) {
+                formData.append('message_id', messageId);
+            }
+            
+            // Get CSRF token
+            const csrfToken = getCsrfToken();
+            console.log('CSRF Token obtained:', csrfToken ? 'Token exists' : 'No token found');
+            
+            // Log request details
+            console.log('%c API REQUEST - About to send file upload request', 'background: #f50; color: white; font-weight: bold;');
+            console.log('Endpoint:', '/api/files/upload/');
+            console.log('Method:', 'POST');
+            console.log('FormData contents:', {
+                file: file.name,
+                conversation_id: conversationId,
+                message_id: messageId || 'Not provided'
+            });
+            
+            // Add a timestamp to force cache busting
+            const timestamp = new Date().getTime();
+            const apiUrl = `/api/files/upload/?_=${timestamp}`;
+            
+            // Force this to be a visible network call by adding headers
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrfToken,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache',
+                    'Expires': '0'
+                },
+                body: formData,
+                credentials: 'same-origin' // Include cookies
+            });
+            
+            console.log('%c API RESPONSE - Received response from server', 'background: #0a5; color: white; font-weight: bold;');
+            console.log('Response status:', response.status);
+            console.log('Response OK:', response.ok);
+            
+            if (!response.ok) {
+                console.error('Upload failed with status:', response.status);
+                let errorData;
+                try {
+                    errorData = await response.json();
+                    console.error('Error details:', errorData);
+                } catch (e) {
+                    const textError = await response.text();
+                    console.error('Error response (text):', textError);
+                    errorData = { error: 'Failed to upload file' };
+                }
+                throw new Error(errorData.error || `Failed to upload file: ${response.status}`);
+            }
+            
+            // Parse response data
+            let data;
+            try {
+                data = await response.json();
+                console.log('%c SUCCESS - File uploaded successfully', 'background: #0c0; color: white; font-weight: bold;');
+                console.log('Server response:', data);
+            } catch (e) {
+                console.error('Failed to parse JSON response:', e);
+                const textResponse = await response.text();
+                console.log('Raw response text:', textResponse);
+                throw new Error('Invalid response format from server');
+            }
+            
+            // Check for file_id in response
+            if (!data.id) {
+                console.error('Server response missing file_id:', data);
+                throw new Error('Server did not return a file_id');
+            }
+            
+            console.log('%c FILE ID - Obtained file ID from server', 'background: #00c; color: white; font-weight: bold;');
+            console.log('File ID:', data.id);
+            
+            // Update notification to show success
+            if (notification && notification.parentNode) {
+                notification.className = 'file-notification success';
+                notification.innerHTML = `
+                    <i class="fas fa-check-circle"></i>
+                    <span>File ${file.name} uploaded successfully (ID: ${data.id})</span>
+                `;
+                
+                // Remove after a delay
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.classList.remove('show');
+                        setTimeout(() => notification.remove(), 300);
+                    }
+                }, 5000);
+            }
+            
+            // Return the data with file_id
+            return data;
+        } catch (error) {
+            console.error('%c ERROR - File upload failed', 'background: #f00; color: white; font-weight: bold;');
+            console.error('Error details:', error);
+            console.error('Stack trace:', error.stack);
+            
+            // Show error notification
+            showFileNotification(`Error uploading file: ${error.message}`, 'error');
+            throw error;
+        }
+    }
+    
+    // Helper function to show file notifications
+    function showFileNotification(message, type = 'info') {
+        // Create notification element
+        const notification = document.createElement('div');
+        notification.className = `file-notification ${type}`;
+        
+        // Add icon based on type
+        let icon = 'info-circle';
+        if (type === 'success') icon = 'check-circle';
+        if (type === 'error') icon = 'exclamation-circle';
+        if (type === 'uploading') icon = 'sync fa-spin';
+        
+        notification.innerHTML = `
+            <i class="fas fa-${icon}"></i>
+            <span>${message}</span>
+        `;
+        
+        // Add to container
+        const container = document.querySelector('.chat-messages');
+        container.appendChild(notification);
+        
+        // Show with animation
+        setTimeout(() => {
+            notification.classList.add('show');
+        }, 10);
+        
+        // Remove after delay unless it's an uploading notification
+        if (type !== 'uploading') {
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => notification.remove(), 300);
+            }, 5000);
+        }
+        
+        return notification;
+    }
+
     // Function to add a message to the chat
-    function addMessageToChat(role, content) {
+    function addMessageToChat(role, content, fileData = null) {
         // Skip adding empty messages
         if (!content || content.trim() === '') {
             console.log(`Skipping empty ${role} message`);
@@ -940,6 +1431,19 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             // For user messages, just escape HTML and replace newlines with <br>
             contentDiv.textContent = content;
+            
+            // Add file attachment indicator if fileData is provided
+            if (fileData) {
+                const fileAttachment = document.createElement('div');
+                fileAttachment.className = 'file-attachment';
+                fileAttachment.innerHTML = `
+                    <i class="fas fa-paperclip"></i>
+                    <span class="file-name">${fileData.name}</span>
+                    <span class="file-type">${fileData.type}</span>
+                `;
+                contentDiv.appendChild(document.createElement('br'));
+                contentDiv.appendChild(fileAttachment);
+            }
         }
         
         // Append elements
@@ -1242,6 +1746,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
             
+            // Load files for this conversation
+            loadMessageFiles(conversationId);
+            
             // Mark this conversation as active in the sidebar
             document.querySelectorAll('.conversation-item').forEach(item => {
                 if (item.dataset.id === conversationId) {
@@ -1330,7 +1837,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Helper function to get CSRF token
     function getCsrfToken() {
-        return document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+        // Try to get it from the meta tag first (Django's standard location)
+        const metaToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+        if (metaToken) {
+            console.log('Found CSRF token in meta tag');
+            return metaToken;
+        }
+        
+        // Then try the input field (another common location)
+        const inputToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value;
+        if (inputToken) {
+            console.log('Found CSRF token in input field');
+            return inputToken;
+        }
+        
+        // Finally try to get it from cookies
+        const cookieValue = document.cookie
+            .split('; ')
+            .find(row => row.startsWith('csrftoken='))
+            ?.split('=')[1];
+        
+        if (cookieValue) {
+            console.log('Found CSRF token in cookies');
+            return cookieValue;
+        }
+        
+        console.error('CSRF token not found in any location');
+        return '';
     }
 
     // Function to delete a conversation
@@ -1571,4 +2104,58 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Expose the test function globally
     window.testNotifications = testNotifications;
+
+    // Function to load message files
+    async function loadMessageFiles(conversationId) {
+        try {
+            const response = await fetch(`/api/conversations/${conversationId}/files/`);
+            const files = await response.json();
+            
+            // Clear existing message files
+            const messageFilesContainer = document.getElementById('message-files');
+            messageFilesContainer.innerHTML = '';
+            
+            // Add message files to the container
+            files.forEach(file => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'message-file';
+                fileItem.textContent = file.name;
+                
+                // Add click handler to download the file
+                fileItem.addEventListener('click', () => {
+                    downloadFile(file.url);
+                });
+                
+                messageFilesContainer.appendChild(fileItem);
+            });
+        } catch (error) {
+            console.error('Error loading message files:', error);
+        }
+    }
+
+    // Function to download a file
+    function downloadFile(fileUrl) {
+        // Implement the logic to download the file from the given URL
+        console.log('Downloading file:', fileUrl);
+    }
+
+    // Add a function to test the file upload API directly for debugging
+    window.testFileUpload = async function(conversationId) {
+        // Create a simple test file
+        const blob = new Blob(['Test file content'], { type: 'text/plain' });
+        const file = new File([blob], 'test-upload.txt', { type: 'text/plain' });
+        
+        console.log('Starting test upload with file:', file);
+        console.log('Using conversation ID:', conversationId);
+        
+        try {
+            const result = await uploadFileToServer(file, conversationId);
+            console.log('Test upload successful:', result);
+            alert(`Test upload successful! File ID: ${result.id}`);
+            return result;
+        } catch (error) {
+            console.error('Test upload failed:', error);
+            alert(`Test upload failed: ${error.message}`);
+        }
+    };
 });

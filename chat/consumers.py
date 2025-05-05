@@ -7,8 +7,15 @@ from django.conf import settings
 # Import everything we need at the module level
 # These imports are safe now because django.setup() is called in asgi.py before imports
 from django.contrib.auth.models import User
-from chat.models import Conversation, Message
+from chat.models import Conversation, Message, ChatFile
 from chat.utils import AIProvider, get_system_prompt
+
+import os
+import base64
+import uuid
+from django.core.files.base import ContentFile
+from chat.models import ChatFile
+from django.conf import settings
 
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -105,6 +112,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 user_message = text_data_json.get('message', '')
                 conversation_id = text_data_json.get('conversation_id')
                 project_id = text_data_json.get('project_id')
+                file_data = text_data_json.get('file')  # Get file data if present
+                # file_id = text_data_json.get('file_id')  # Get file_id if present
+
+                # print("\n\n\n\nFile ID: ", file_data.get('id'))
+                
+                # Check if we have either a message or file data
+                if not user_message and not file_data:
+                    await self.send_error("Message cannot be empty")
+                    return
                 
                 # Get or create conversation
                 if conversation_id and not self.conversation:
@@ -116,15 +132,32 @@ class ChatConsumer(AsyncWebsocketConsumer):
                         await self.send_error("A project ID is required to create a conversation")
                         return
                     
-                    self.conversation = await self.create_conversation(user_message[:50], project_id)
+                    # If message is empty but there's a file, use the filename as the title
+                    conversation_title = user_message[:50] if user_message else f"File: {file_data.get('name', 'Untitled')}"
+                    self.conversation = await self.create_conversation(conversation_title, project_id)
                     
                     # Check if conversation was created
                     if not self.conversation:
                         await self.send_error("Failed to create conversation. Please check your project ID.")
                         return
                 
-                # Save user message
-                await self.save_message('user', user_message)
+                # If the message is empty but there's a file, use a placeholder message
+                if not user_message and file_data:
+                    user_message = f"[Shared a file: {file_data.get('name', 'file')}]"
+                
+                
+                
+                # If file data is provided, save file reference
+                if file_data:
+                    print(f"Processing file data: {file_data}")
+                    # file_info = await self.save_file_reference(file_data)
+                    # if file_info:
+                    #     print(f"File saved: {file_info['original_filename']}")
+                    message = await self.save_message_with_file('user', user_message, file_data)
+
+                else:
+                    # Save user message
+                    message = await self.save_message('user', user_message)
                 
                 # Reset stop flag
                 self.should_stop_generation = False
@@ -408,6 +441,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         This method wraps the synchronous generate_stream method of the AI provider
         in an asynchronous context by running it in a thread pool executor.
         """
+        print("\n\n\nMessages: ", messages)
         try:
             # Get the event loop
             loop = asyncio.get_running_loop()
@@ -505,28 +539,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
             print(f"Error in process_ai_stream: {str(e)}")
             yield f"Error generating response: {str(e)}"
     
-    async def get_system_prompt_(self):
-        """
-        Get the system prompt for the AI
-        """
-        return """
-You are an expert technical product manager. You will respond in markdown format. You will greet the user
-saying that you are michael scott.
-
-You will offer your help in helping the client build useful web apps and other software. 
-
-You will also offer to help the client with their projects.
-
-When they provide a requirement, and if it is not clear or absurd, you will ask for clarification..
-
-You will ask questions as many times as required. 
-
-Then when you have enough information, you will create a rough PRD of the project and share it 
-with the client. You will ask for clarification and only proceed after that.
-
-In the PRD, you will primarily work towards defining the features, the personas who might use the app,
-the core functionalities, the design layout, etc.
-"""
     
     async def send_error(self, error_message):
         """
@@ -594,6 +606,10 @@ the core functionalities, the design layout, etc.
         """
         Save message to database
         """
+        # Note: file_data handling should be done at the async level, not here
+        # The caller should use: await self.save_file_reference(file_data)
+        # We don't try to process file_data inside this sync function
+
         if self.conversation:
             return Message.objects.create(
                 conversation=self.conversation,
@@ -602,6 +618,55 @@ the core functionalities, the design layout, etc.
             )
         return None
     
+    @database_sync_to_async
+    def save_message_with_file(self, role, content, file_data):
+        """
+        Save message to database with file data
+        """
+        # Note: file_data handling should be done at the async level, not here
+        # The caller should use: await self.save_file_reference(file_data)
+        # We don't try to process file_data inside this sync function
+
+        file_id = file_data.get('id')
+
+        file_obj = ChatFile.objects.get(id=file_id)
+
+        # Construct the full file path by joining MEDIA_ROOT with the relative file path
+        full_file_path = os.path.join(settings.MEDIA_ROOT, str(file_obj.file))
+        
+        # Read the file content if it exists
+        if os.path.exists(full_file_path):
+            with open(full_file_path, 'rb') as f:
+                base64_content = base64.b64encode(f.read()).decode('utf-8')
+        else:
+            print(f"File not found at path: {full_file_path}")
+            base64_content = None
+
+        # Construct data URI
+        data_uri = f"data:{file_obj.file_type};base64,{base64_content}"
+        # print("\n\n\n\nData URI: ", data_uri)
+
+        content_if_file = [
+            {"type": "text", "text": content},
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": data_uri
+                }
+            }
+        ]
+
+        # print("\n\n\n\nContent if file: ", content_if_file)
+
+        if self.conversation:
+            return Message.objects.create(
+                conversation=self.conversation,
+                role=role,
+                content_if_file=content_if_file
+            )
+        return None
+        
+
     @database_sync_to_async
     def get_messages_for_ai(self):
         """
@@ -612,9 +677,9 @@ the core functionalities, the design layout, etc.
             
         messages = Message.objects.filter(conversation=self.conversation).order_by('-created_at')[:15]
         messages = reversed(list(messages))  # Convert to list and reverse
-        print("\n\n Messages: ", messages)
+        # print("\n\n Messages: ", messages)
         return [
-            {"role": msg.role, "content": msg.content}
+            {"role": msg.role, "content": msg.content if msg.content is not None and msg.content != "" else msg.content_if_file}
             for msg in messages
         ]
     
@@ -630,7 +695,7 @@ the core functionalities, the design layout, etc.
         return [
             {
                 'role': msg.role,
-                'content': msg.content,
+                'content': msg.content if msg.content is not None or msg.content != "" else msg.content_if_file,
                 'timestamp': msg.created_at.isoformat()
             } for msg in messages
         ]
@@ -643,6 +708,59 @@ the core functionalities, the design layout, etc.
         if self.conversation and self.conversation.project:
             return self.conversation.project.id
         return None
+    
+    @database_sync_to_async
+    def save_file_reference(self, file_data):
+        """
+        Save file reference to database
+        """
+        if not self.conversation:
+            return None
+            
+        try:
+            # Extract file metadata from the file_data object
+            original_filename = file_data.get('name', 'unnamed_file')
+            file_type = file_data.get('type', 'application/octet-stream')
+            file_size = file_data.get('size', 0)
+            
+            # Check for content, but don't expect it in normal operation
+            # The WebSocket message typically only contains file metadata, not the actual content
+            file_content = file_data.get('content')
+            print("\n\n\n\nFile content: ", file_content)
+            if file_content:
+                # This branch is only for when content is actually included
+                # Decode base64 data if it's included
+                file_base64_content = base64.b64decode(file_content)
+                print("\n\n\n\nFile base64 content: ", file_base64_content)
+                print("File content was included and decoded")
+            else:
+                # This is the expected normal path - file content is uploaded separately
+                print(f"Saving file reference for {original_filename} (content will be uploaded separately)")
+            
+            # Create a placeholder file as we don't have the actual content yet
+            # The real file would be uploaded through the REST API
+            placeholder_path = os.path.join('file_storage', str(self.conversation.id))
+            os.makedirs(os.path.join(settings.MEDIA_ROOT, placeholder_path), exist_ok=True)
+            
+            file_obj = ChatFile.objects.create(
+                conversation=self.conversation,
+                original_filename=original_filename,
+                file_type=file_type,
+                file_size=file_size,
+                # We'll set an empty file as a placeholder
+                file=ContentFile(b'', name=f"{uuid.uuid4()}.bin")
+            )
+            
+            return {
+                'id': file_obj.id,
+                'original_filename': file_obj.original_filename,
+                'file_type': file_obj.file_type,
+                'file_size': file_obj.file_size
+            }
+            
+        except Exception as e:
+            print(f"Error saving file reference: {str(e)}")
+            return None
     
     async def generate_title_with_ai(self, user_message, ai_response):
         """

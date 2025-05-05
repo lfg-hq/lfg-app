@@ -1,0 +1,646 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dev Environment Editor</title>
+
+<!-- Monaco & Material Icons -->
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.40.0/min/vs/loader.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css">
+
+<style>
+/* ── transparent scrollbar everywhere ───────────────────────────── */
+*::-webkit-scrollbar{width:10px!important;height:10px!important;background:transparent!important}
+*::-webkit-scrollbar-track,*::-webkit-scrollbar-corner{background:transparent!important}
+*::-webkit-scrollbar-thumb{background:#424242!important;border:2px solid transparent!important;border-radius:5px!important}
+*::-webkit-scrollbar-thumb:hover{background:#525252!important}
+#file-explorer,#terminal,.monaco-scrollable-element{scrollbar-width:thin;scrollbar-color:#424242 transparent;-ms-overflow-style:none;transition:scrollbar-color .2s}
+#file-explorer:not(:hover)::-webkit-scrollbar-thumb,
+#terminal:not(:hover)::-webkit-scrollbar-thumb,
+.monaco-scrollable-element:not(:hover)::-webkit-scrollbar-thumb{background:transparent}
+
+/* ── layout ─────────────────────────────────────────────────────── */
+body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,Cantarell,'Open Sans','Helvetica Neue',sans-serif;background:#1e1e1e}
+#container{display:flex;height:100vh;background:#1e1e1e}
+
+/* Explorer pane */
+#file-explorer{min-width:100px;max-width:600px;width:250px;background:#252526;color:#fff;overflow-y:auto;font-size:13px;flex-shrink:0}
+.explorer-title{padding:10px 20px;font-size:11px;text-transform:uppercase;font-weight:700;letter-spacing:1px;color:#bbb;background:#252526;display:flex;justify-content:space-between;align-items:center}
+.explorer-actions{display:flex;gap:5px}
+.explorer-action{cursor:pointer;opacity:0.7;transition:opacity 0.2s}
+.explorer-action:hover{opacity:1}
+
+/* Terminal title */
+.terminal-title{padding:6px 10px;font-size:11px;text-transform:uppercase;font-weight:700;letter-spacing:1px;color:#bbb;background:#1e1e1e;border-top:1px solid #333;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center}
+.terminal-actions{display:flex;gap:5px}
+.terminal-action{cursor:pointer;opacity:0.7;transition:opacity 0.2s}
+.terminal-action:hover{opacity:1}
+
+/* Editor / terminal column */
+#editor-container{flex-grow:1;display:flex;flex-direction:column;background:#1e1e1e}
+#monaco-editor{flex-grow:1}
+#h-resizer{height:5px;width:100%;background:#1e1e1e;cursor:row-resize;transition:background .2s}
+#h-resizer:hover,#h-resizer.dragging{background:#0e639c}
+
+#terminal{
+    height:200px;
+    background:#1e1e1e;
+    color:#d4d4d4;
+    overflow-y:auto;
+    padding:10px;
+    font-family:'JetBrains Mono', Consolas, monospace;
+    border-top:1px solid #333;
+    box-shadow:inset 0 0 8px rgba(0,0,0,.6);
+}
+/* Input row inside terminal */
+.terminal-input-line{display:flex;align-items:center;margin-top:4px}
+.prompt{color:#0dbc79;font-family:'JetBrains Mono', Consolas, monospace;margin-right:6px}
+#terminal-input{flex:1;min-width:0;background:transparent;border:none;color:#fff;font-family:inherit;outline:none;font-size:13px}
+
+.terminal-output{white-space:pre-wrap;margin:2px 0;font-size:13px;line-height:1.4}
+.terminal-output.cmd   {color:#0dbc79}
+.terminal-output.out   {color:#d4d4d4}
+.terminal-output.error {color:#f14c4c}
+.terminal-output.system{color:#3794ff}
+
+/* File‑tree */
+.file-tree{list-style:none;padding:0;margin:0;background:#252526}
+.file-item{display:flex;align-items:center;padding:4px 8px 4px 20px;cursor:pointer;user-select:none;white-space:nowrap;background:transparent}
+.file-item:hover{background:#2a2d2e}
+.file-item.active{background:#37373d}
+.file-item i{margin-right:6px;font-size:16px;width:16px;text-align:center;color:#c5c5c5}
+.directory>.file-item{padding-left:calc(20px*var(--depth,1))}
+.file-item.file{padding-left:calc(20px*var(--depth,1))}
+.directory>.file-item i.mdi-chevron-right{transition:transform .15s}
+.directory.expanded>.file-item i.mdi-chevron-right{transform:rotate(90deg)}
+.directory>.file-tree{display:none}
+.directory.expanded>.file-tree{display:block}
+
+/* Monaco background override */
+.monaco-editor,.monaco-editor .margin,.monaco-editor-background,
+.monaco-editor .inputarea.ime-input{background:#1e1e1e!important}
+
+/* Vertical resizer */
+#resizer{width:5px;background:#1e1e1e;cursor:col-resize;transition:background .2s}
+#resizer:hover,#resizer.dragging{background:#0e639c}
+.dragging{user-select:none}
+
+/* Context‑menu */
+.context-menu{position:fixed;background:#252526;border:1px solid #454545;box-shadow:0 2px 8px rgba(0,0,0,.15);padding:4px 0;min-width:150px;z-index:1000}
+.context-menu-item{padding:6px 12px;cursor:pointer;color:#ccc;font-size:13px;display:flex;align-items:center}
+.context-menu-item:hover{background:#094771;color:#fff}
+.context-menu-item i{margin-right:8px;font-size:16px}
+.context-menu-separator{height:1px;background:#454545;margin:4px 0}
+.context-menu-item.danger{color:#f14c4c}
+.context-menu-item.danger:hover{background:#3c1f1f;color:#ff6b6b}
+
+/* Status bar */
+#status-bar{height:22px;background:#007acc;color:#fff;font-size:12px;display:flex;align-items:center;padding:0 10px;user-select:none}
+.status-item{margin-right:15px;display:flex;align-items:center}
+.status-item i{margin-right:5px;font-size:14px}
+.connection-status{display:flex;align-items:center}
+.status-dot{width:8px;height:8px;border-radius:50%;margin-right:5px}
+.status-dot.connected{background:#3ECF8E}
+.status-dot.disconnected{background:#f14c4c}
+
+/* Tabs bar */
+#tabs-bar{height:35px;background:#252526;display:flex;align-items:center;overflow-x:auto;user-select:none;border-bottom:1px solid #333}
+.tab{height:100%;padding:0 10px;display:flex;align-items:center;background:#2D2D2D;border-right:1px solid #1e1e1e;min-width:100px;max-width:200px;position:relative}
+.tab.active{background:#1e1e1e}
+.tab-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#ccc;font-size:13px}
+.tab.active .tab-title{color:#fff}
+.tab-close{margin-left:8px;opacity:0.7;cursor:pointer;color:#ccc;display:flex;align-items:center}
+.tab-close:hover{opacity:1;color:#fff}
+.tab-icon{margin-right:5px;font-size:14px;color:#ccc}
+
+/* No context message */
+.no-context-message {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    max-width: 600px;
+    padding: 30px;
+    background: #252526;
+    border: 1px solid #454545;
+    color: #d4d4d4;
+    border-radius: 5px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.3);
+    text-align: center;
+}
+.no-context-message h2 {
+    margin-top: 0;
+    color: #0e639c;
+}
+.no-context-message p {
+    margin-bottom: 20px;
+}
+.no-context-message code {
+    display: block;
+    background: #1e1e1e;
+    padding: 10px;
+    border-radius: 4px;
+    margin: 15px 0;
+    font-family: 'JetBrains Mono', Consolas, monospace;
+}
+
+/* Tooltips */
+.tooltip {
+    position: relative;
+}
+.tooltip:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 5px 10px;
+    background: #252526;
+    color: #fff;
+    border-radius: 3px;
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 1000;
+    box-shadow: 0 2px 8px rgba(0,0,0,.15);
+}
+</style>
+</head>
+<body>
+{% if no_context %}
+<div class="no-context-message">
+    <h2>Missing Context</h2>
+    <p>{{ message }}</p>
+    <p>Examples:</p>
+    <code>/coding/editor/?project_id=my-project-123</code>
+    <p>or</p>
+    <code>/coding/editor/?conversation_id=my-conversation-456</code>
+</div>
+{% else %}
+<div id="container">
+    <!-- Explorer -->
+    <div id="file-explorer">
+        <div class="explorer-title">
+            <span>EXPLORER</span>
+            <div class="explorer-actions">
+                <div class="explorer-action tooltip" onclick="createNewFile()" data-tooltip="New File">
+                    <i class="mdi mdi-file-plus"></i>
+                </div>
+                <div class="explorer-action tooltip" onclick="createNewFolder()" data-tooltip="New Folder">
+                    <i class="mdi mdi-folder-plus"></i>
+                </div>
+                <div class="explorer-action tooltip" onclick="refreshTree()" data-tooltip="Refresh">
+                    <i class="mdi mdi-refresh"></i>
+                </div>
+            </div>
+        </div>
+        <div id="file-tree-container"></div>
+    </div>
+
+    <!-- Vertical resizer -->
+    <div id="resizer"></div>
+
+    <!-- Editor + horizontal resizer + terminal -->
+    <div id="editor-container">
+        <!-- Tabs bar -->
+        <div id="tabs-bar"></div>
+        
+        <div id="monaco-editor"></div>
+        <div id="h-resizer"></div>
+        
+        <div class="terminal-title">
+            <span>TERMINAL</span>
+            <div class="terminal-actions">
+                <div class="terminal-action tooltip" onclick="clearTerminal()" data-tooltip="Clear">
+                    <i class="mdi mdi-delete-sweep"></i>
+                </div>
+                <div class="terminal-action tooltip" onclick="toggleTerminal()" data-tooltip="Toggle Terminal">
+                    <i class="mdi mdi-arrow-up-down"></i>
+                </div>
+            </div>
+        </div>
+        <div id="terminal">
+            <div id="terminal-output">
+                <div class="terminal-output system">Welcome to Dev Environment Terminal</div>
+                <div class="terminal-output system">Type 'help' for available commands</div>
+            </div>
+            <div class="terminal-input-line">
+                <span class="prompt">$</span>
+                <input id="terminal-input" placeholder="Enter command…">
+            </div>
+        </div>
+        
+        <!-- Status bar -->
+        <div id="status-bar">
+            <div class="status-item connection-status">
+                <div class="status-dot connected"></div>
+                <span>Connected</span>
+            </div>
+            <div class="status-item" id="current-file-path"></div>
+            <div class="status-item" id="line-col"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Context‑menu -->
+<div id="context-menu" class="context-menu" style="display:none">
+    <div class="context-menu-item" onclick="createNewFile()"><i class="mdi mdi-file-plus"></i>New File</div>
+    <div class="context-menu-item" onclick="createNewFolder()"><i class="mdi mdi-folder-plus"></i>New Folder</div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item" onclick="renameItem()"><i class="mdi mdi-pencil"></i>Rename</div>
+    <div class="context-menu-item danger" onclick="deleteItem()"><i class="mdi mdi-delete"></i>Delete</div>
+</div>
+
+<script>
+/*─────────────────────────────────────────────────────────────
+  Get project_id and conversation_id from URL parameters
+─────────────────────────────────────────────────────────────*/
+const urlParams = new URLSearchParams(window.location.search);
+const projectId = urlParams.get('project_id');
+const conversationId = urlParams.get('conversation_id');
+
+/*─────────────────────────────────────────────────────────────
+  Context‑menu helpers
+─────────────────────────────────────────────────────────────*/
+let contextMenuTarget=null;
+function showContextMenu(e,target){
+    e.preventDefault();
+    const m=document.getElementById('context-menu');
+    m.style.display='block';m.style.left=e.pageX+'px';m.style.top=e.pageY+'px';
+    contextMenuTarget=target;
+}
+function hideContextMenu(){document.getElementById('context-menu').style.display='none';contextMenuTarget=null}
+document.addEventListener('contextmenu',e=>{
+    const item=e.target.closest('#file-explorer .file-item');
+    if(item)showContextMenu(e,item);
+});
+document.addEventListener('click',hideContextMenu);
+
+/*─────────────────────────────────────────────────────────────
+  Terminal helpers
+─────────────────────────────────────────────────────────────*/
+function clearTerminal() {
+    document.getElementById('terminal-output').innerHTML = '';
+    appendToTerminal('Terminal cleared', 'system');
+}
+
+function toggleTerminal() {
+    const terminal = document.getElementById('terminal');
+    const currentHeight = terminal.offsetHeight;
+    
+    if (currentHeight <= 30) {
+        // Terminal is minimized, restore it
+        terminal.style.height = '200px';
+    } else {
+        // Terminal is showing, minimize it
+        terminal.style.height = '30px';
+    }
+    
+    // Relayout Monaco
+    if(window.editor) window.editor.layout();
+}
+
+/*─────────────────────────────────────────────────────────────
+  Icon map
+─────────────────────────────────────────────────────────────*/
+const fileIcons={py:'language-python',js:'language-javascript',jsx:'language-javascript',ts:'language-typescript',tsx:'language-typescript',html:'language-html5',css:'language-css3',scss:'language-sass',less:'language-less',php:'language-php',java:'language-java',cpp:'language-cpp',c:'language-c',cs:'language-csharp',go:'language-go',rb:'language-ruby',rs:'language-rust',swift:'language-swift',kt:'language-kotlin',json:'code-json',xml:'code-tags',svg:'svg',vue:'vuejs',react:'react',yml:'code-braces',yaml:'code-braces',toml:'code-braces',ini:'code-braces',conf:'cog',config:'cog',dockerfile:'docker','docker-compose.yml':'docker','docker-compose.yaml':'docker',sh:'console',bash:'console',zsh:'console',fish:'console',md:'language-markdown',txt:'text',pdf:'file-pdf-box',doc:'file-word-box',docx:'file-word-box',xls:'file-excel-box',xlsx:'file-excel-box',ppt:'file-powerpoint-box',pptx:'file-powerpoint-box',sql:'database',sqlite:'database',sqlite3:'database',db:'database',png:'file-image',jpg:'file-image',jpeg:'file-image',gif:'file-image',ico:'file-image',webp:'file-image',zip:'zip-box',rar:'zip-box','7z':'zip-box',tar:'zip-box',gz:'zip-box','.gitignore':'git','.gitmodules':'git','.gitattributes':'git','package.json':'nodejs','package-lock.json':'nodejs','requirements.txt':'language-python',Pipfile:'language-python','poetry.lock':'language-python','composer.json':'language-php',Gemfile:'language-ruby','pom.xml':'language-java','build.gradle':'language-java',default:'file-document-outline'};
+function getFileIcon(name){
+    if(fileIcons[name.toLowerCase()])return fileIcons[name.toLowerCase()];
+    const ext=name.split('.').pop().toLowerCase();
+    return fileIcons[ext]||fileIcons.default
+}
+
+/*─────────────────────────────────────────────────────────────
+  Tabs management
+─────────────────────────────────────────────────────────────*/
+const openTabs = new Map(); // path -> { model, viewState }
+let activeTab = null;
+
+function createTab(path, name, model) {
+    // Check if tab already exists
+    if (document.querySelector(`.tab[data-path="${path}"]`)) {
+        activateTab(path);
+        return;
+    }
+    
+    const tabsBar = document.getElementById('tabs-bar');
+    const tab = document.createElement('div');
+    tab.className = 'tab';
+    tab.dataset.path = path;
+    
+    const ext = name.split('.').pop().toLowerCase();
+    const iconClass = 'mdi-' + (fileIcons[ext] || fileIcons.default);
+    
+    tab.innerHTML = `
+        <i class="mdi ${iconClass} tab-icon"></i>
+        <div class="tab-title">${name}</div>
+        <div class="tab-close" onclick="closeTab('${path}', event)">
+            <i class="mdi mdi-close"></i>
+        </div>
+    `;
+    
+    tab.addEventListener('click', () => activateTab(path));
+    tabsBar.appendChild(tab);
+    
+    // Store model and initial view state
+    openTabs.set(path, { 
+        model: model,
+        viewState: null,
+        name: name
+    });
+    
+    activateTab(path);
+}
+
+function activateTab(path) {
+    // Save current tab view state if exists
+    if (activeTab) {
+        const tabInfo = openTabs.get(activeTab);
+        if (tabInfo) {
+            tabInfo.viewState = editor.saveViewState();
+            openTabs.set(activeTab, tabInfo);
+        }
+        
+        // Remove active class from current tab
+        const currentActiveTab = document.querySelector('.tab.active');
+        if (currentActiveTab) {
+            currentActiveTab.classList.remove('active');
+        }
+    }
+    
+    // Activate new tab
+    const tab = document.querySelector(`.tab[data-path="${path}"]`);
+    if (tab) {
+        tab.classList.add('active');
+        document.getElementById('current-file-path').textContent = path;
+    }
+    
+    // Set editor model
+    const tabInfo = openTabs.get(path);
+    if (tabInfo) {
+        editor.setModel(tabInfo.model);
+        if (tabInfo.viewState) {
+            editor.restoreViewState(tabInfo.viewState);
+        }
+        editor.focus();
+    }
+    
+    activeTab = path;
+}
+
+function closeTab(path, event) {
+    if (event) {
+        event.stopPropagation();
+    }
+    
+    // Remove tab element
+    const tab = document.querySelector(`.tab[data-path="${path}"]`);
+    if (tab) {
+        tab.remove();
+    }
+    
+    // Cleanup tab data
+    const tabInfo = openTabs.get(path);
+    if (tabInfo && tabInfo.model) {
+        tabInfo.model.dispose();
+    }
+    openTabs.delete(path);
+    
+    // If this was the active tab, activate another tab if available
+    if (activeTab === path) {
+        const remainingTabs = Array.from(openTabs.keys());
+        if (remainingTabs.length > 0) {
+            activateTab(remainingTabs[0]);
+        } else {
+            activeTab = null;
+            editor.setModel(null);
+            document.getElementById('current-file-path').textContent = '';
+        }
+    }
+}
+
+/*─────────────────────────────────────────────────────────────
+  Monaco boot‑strap
+─────────────────────────────────────────────────────────────*/
+require.config({paths:{vs:'https://cdn.jsdelivr.net/npm/monaco-editor@0.40.0/min/vs'}});
+require(['vs/editor/editor.main'],()=>{
+
+const editor=monaco.editor.create(document.getElementById('monaco-editor'),{
+    value:'',
+    language:'javascript',
+    theme:'vs-dark',
+    automaticLayout:true,
+    minimap: { enabled: true },
+    scrollBeyondLastLine: false,
+    lineNumbers: 'on',
+    renderWhitespace: 'all',
+    fontFamily: "'JetBrains Mono', Consolas, 'Courier New', monospace",
+    fontSize: 14,
+    fontLigatures: true
+});
+
+// expose for other handlers
+window.editor = editor;
+
+// Update line/column display
+editor.onDidChangeCursorPosition(e => {
+    document.getElementById('line-col').textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
+});
+
+// Add keyboard shortcuts
+editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, saveFile);
+editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, () => {
+    // Implement command palette
+    appendToTerminal('Command palette not implemented yet', 'system');
+});
+
+let currentFile='';
+let activeItem=null;
+
+/*── render tree ──────────────────────────────────────────*/
+function renderFileTree(items,isRoot=false,depth=1){
+    let html='<ul class="file-tree"'+(isRoot?' id="root-tree"':'')+'>';
+    html+=items.map(item=>{
+        if(item.type==='directory'){
+            return`<li class="directory" style="--depth:${depth}">
+                      <div class="file-item" data-path="${item.path}">
+                          <i class="mdi mdi-chevron-right"></i>
+                          <i class="mdi mdi-folder${item.name.startsWith('.')?'-hidden':''}"></i>${item.name}
+                      </div>
+                      ${renderFileTree(item.children,false,depth+1)}
+                    </li>`;
+        }
+        return`<li style="--depth:${depth}">
+                  <div class="file-item file" data-path="${item.path}">
+                      <i class="mdi mdi-${getFileIcon(item.name)}"></i>${item.name}
+                  </div>
+                </li>`;
+    }).join('');
+    return html+'</ul>';
+}
+
+/*── load / refresh tree ─────────────────────────────────*/
+function loadFileTree(){
+    const container=document.getElementById('file-tree-container');
+    const expanded=Array.from(container.querySelectorAll('.directory.expanded>.file-item'))
+                        .map(it=>it.dataset.path);
+    const scrollPos=container.scrollTop;
+
+    // Create request data with optional project_id or conversation_id
+    const requestData = {};
+    if (projectId) requestData.project_id = projectId;
+    if (conversationId) requestData.conversation_id = conversationId;
+
+    return fetch('/coding/get_file_tree/', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'Cache-Control': 'no-cache'},
+        body: JSON.stringify(requestData)
+    })
+    .then(r=>r.json())
+    .then(data=>{
+        if (data.error) {
+            appendToTerminal('Error loading file tree: ' + data.error, 'error');
+            return;
+        }
+            
+        const newHTML=renderFileTree(data.files,true);
+        if(container.innerHTML===newHTML)return;
+
+        container.innerHTML=newHTML;
+        expanded.forEach(path=>{
+            const el=container.querySelector(`.directory>.file-item[data-path="${path}"]`);
+            if(el)el.parentElement.classList.add('expanded');
+        });
+        container.querySelectorAll('.directory>.file-item').forEach(item=>{
+            item.addEventListener('click',e=>{
+                e.stopPropagation();
+                item.parentElement.classList.toggle('expanded');
+            });
+        });
+        container.querySelectorAll('.file-item.file').forEach(item=>{
+            const p=item.dataset.path;
+            item.onclick=()=>openFile(p,item);
+        });
+        if(currentFile){
+            const again=container.querySelector(`.file-item[data-path="${currentFile}"]`);
+            if(again){again.classList.add('active');activeItem=again;}
+        }
+        container.scrollTop=scrollPos;
+    })
+    .catch(err=>appendToTerminal('Error loading file tree: '+err,'error'));
+}
+window.refreshTree=loadFileTree;
+
+/*── open file ───────────────────────────────────────────*/
+function openFile(path,element){
+    if(activeItem)activeItem.classList.remove('active');
+    element.classList.add('active');
+    activeItem=element;
+    currentFile=path;
+
+    // Create request data with path and optional project_id or conversation_id
+    const requestData = { path };
+    if (projectId) requestData.project_id = projectId;
+    if (conversationId) requestData.conversation_id = conversationId;
+
+    fetch('/coding/get_file_content/',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(requestData)
+    })
+    .then(r=>r.json())
+    .then(data=>{
+        if (data.error) {
+            appendToTerminal('Error opening file: ' + data.error, 'error');
+            return;
+        }
+        const fileName = path.split('/').pop();
+        const ext=path.split('.').pop();
+        const lang=monaco.languages.getLanguages().find(l=>l.extensions?.includes('.'+ext))?.id||'plaintext';
+        
+        // Create model for file
+        const model = monaco.editor.createModel(data.content, lang);
+        
+        // Create a tab for this file
+        createTab(path, fileName, model);
+    })
+    .catch(err => appendToTerminal('Error opening file: ' + err, 'error'));
+}
+
+/*── auto‑save ───────────────────────────────────────────*/
+let saveTimeout;
+editor.onDidChangeModelContent(()=>{
+    if(!activeTab)return;
+    clearTimeout(saveTimeout);
+    saveTimeout=setTimeout(saveFile,1000);
+    
+    // Show unsaved indicator
+    const tab = document.querySelector(`.tab[data-path="${activeTab}"]`);
+    if (tab) {
+        const title = tab.querySelector('.tab-title');
+        if (!title.textContent.startsWith('*')) {
+            title.textContent = '* ' + title.textContent;
+        }
+    }
+});
+
+function saveFile(){
+    if(!activeTab)return;
+
+    // Create request data with path, content, and optional project_id or conversation_id
+    const requestData = { 
+        path: activeTab,
+        content: editor.getValue()
+    };
+    if (projectId) requestData.project_id = projectId;
+    if (conversationId) requestData.conversation_id = conversationId;
+
+    fetch('/coding/save_file/',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(requestData)
+    })
+    .then(r=>r.json())
+    .then(data=>{
+        if (data.error) {
+            appendToTerminal('Error saving file: ' + data.error, 'error');
+            return;
+        }
+        appendToTerminal('File saved: '+activeTab,'out');
+        
+        // Remove unsaved indicator
+        const tab = document.querySelector(`.tab[data-path="${activeTab}"]`);
+        if (tab) {
+            const title = tab.querySelector('.tab-title');
+            if (title.textContent.startsWith('* ')) {
+                const tabInfo = openTabs.get(activeTab);
+                title.textContent = tabInfo ? tabInfo.name : title.textContent.substring(2);
+            }
+        }
+    })
+    .catch(err=>appendToTerminal('Error saving file: '+err,'error'));
+}
+
+/*── CRUD (create / rename / delete) ─────────────────────*/
+window.createNewFile=function(){
+    const name=prompt('Enter file name:');if(!name)return hideContextMenu();
+    const base=contextMenuTarget?.dataset.path??'';const path=base?`${base}/${name}`:name;
+    
+    // Create request data with path, content, and optional project_id or conversation_id
+    const requestData = { path, content: '' };
+    if (projectId) requestData.project_id = projectId;
+    if (conversationId) requestData.conversation_id = conversationId;
+
+    fetch('/coding/save_file/',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(requestData)
+    })
+    .then(r=>r.json())
+    .then(res=>{
+        res.error ? appendToTerminal('Error creating file: '+res.error,'error')
+                  : appendToTerminal('File created: '+path,'out');
+        refreshTree();
+    })
+    .catch(err=>appendToTerminal('Error creating file: '+err,'error'))
+    .finally(hideContextMenu);
+};

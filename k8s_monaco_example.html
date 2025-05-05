@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kubernetes Monaco Editor Example</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.34.0/min/vs/loader.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+        
+        #sidebar {
+            width: 300px;
+            background-color: #f0f0f0;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #ccc;
+            overflow-y: auto;
+        }
+        
+        #editor-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        #editor {
+            flex: 1;
+        }
+        
+        #toolbar {
+            padding: 10px;
+            background-color: #e6e6e6;
+            border-bottom: 1px solid #ccc;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        #file-tree {
+            margin-top: 15px;
+            flex-grow: 1;
+            overflow-y: auto;
+        }
+        
+        .tree-item {
+            padding: 5px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+        }
+        
+        .tree-item:hover {
+            background-color: #e0e0e0;
+        }
+        
+        .tree-folder {
+            font-weight: bold;
+        }
+        
+        .tree-file {
+            font-weight: normal;
+        }
+        
+        .tree-children {
+            padding-left: 20px;
+        }
+        
+        button {
+            padding: 5px 10px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        #env-toggle {
+            margin-bottom: 15px;
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        
+        #pod-info {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            font-size: 12px;
+        }
+        
+        .status-running {
+            color: green;
+        }
+        
+        .status-pending {
+            color: orange;
+        }
+        
+        .status-error {
+            color: red;
+        }
+        
+        #terminal {
+            height: 150px;
+            background-color: #000;
+            color: #fff;
+            padding: 10px;
+            font-family: monospace;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        
+        #command-input {
+            display: flex;
+            background-color: #000;
+            padding: 0 10px 10px 10px;
+        }
+        
+        #command-input input {
+            flex: 1;
+            padding: 5px;
+            background-color: #333;
+            color: #fff;
+            border: 1px solid #555;
+        }
+        
+        #command-input button {
+            margin-left: 5px;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        #status-bar {
+            padding: 5px 10px;
+            background-color: #333;
+            color: #fff;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <div id="env-toggle">
+            <label>
+                <input type="checkbox" id="k8s-toggle"> Use Kubernetes 
+            </label>
+        </div>
+        
+        <div id="pod-info" class="hidden">
+            <h3>Pod Information</h3>
+            <div id="pod-info-content"></div>
+        </div>
+        
+        <div>
+            <button id="refresh-button">Refresh Files</button>
+            <button id="new-file-button">New File</button>
+            <button id="new-folder-button">New Folder</button>
+        </div>
+        
+        <div id="file-tree"></div>
+    </div>
+    
+    <div id="editor-container">
+        <div id="toolbar">
+            <div>
+                <span id="current-file">No file selected</span>
+            </div>
+            <div>
+                <button id="save-button" disabled>Save</button>
+            </div>
+        </div>
+        
+        <div id="editor"></div>
+        
+        <div id="terminal" class="hidden"></div>
+        
+        <div id="command-input" class="hidden">
+            <input type="text" id="command-text" placeholder="Enter command...">
+            <button id="run-command-button">Run</button>
+        </div>
+        
+        <div id="status-bar">Ready</div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_BASE_URL = 'http://localhost:8000';
+        let PROJECT_ID = '123'; // Replace with your project ID or get from URL params
+        let CONVERSATION_ID = null; // Replace with conversation ID if needed
+        
+        // Get project ID from URL params if available
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('project_id')) {
+            PROJECT_ID = urlParams.get('project_id');
+        }
+        if (urlParams.has('conversation_id')) {
+            CONVERSATION_ID = urlParams.get('conversation_id');
+        }
+        
+        // State
+        let editor = null;
+        let currentFilePath = null;
+        let isModified = false;
+        let isKubernetes = false;
+        let currentFileTree = null;
+        
+        // Initialize Monaco Editor
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.34.0/min/vs' }});
+        require(['vs/editor/editor.main'], function() {
+            editor = monaco.editor.create(document.getElementById('editor'), {
+                value: '// Select a file to edit',
+                language: 'javascript',
+                theme: 'vs-dark',
+                automaticLayout: true
+            });
+            
+            editor.onDidChangeModelContent(() => {
+                isModified = true;
+                document.getElementById('save-button').disabled = false;
+            });
+            
+            // Initialize app after editor is ready
+            initializeApp();
+        });
+
+        // Initialize the application
+        function initializeApp() {
+            // Add event listeners
+            document.getElementById('k8s-toggle').addEventListener('change', toggleEnvironment);
+            document.getElementById('refresh-button').addEventListener('click', refreshFileTree);
+            document.getElementById('save-button').addEventListener('click', saveCurrentFile);
+            document.getElementById('new-file-button').addEventListener('click', createNewFile);
+            document.getElementById('new-folder-button').addEventListener('click', createNewFolder);
+            document.getElementById('run-command-button').addEventListener('click', runCommand);
+            
+            // Initial file tree load
+            refreshFileTree();
+        }
+        
+        // Toggle between Docker and Kubernetes environments
+        function toggleEnvironment() {
+            isKubernetes = document.getElementById('k8s-toggle').checked;
+            
+            // Show/hide Kubernetes specific elements
+            const podInfo = document.getElementById('pod-info');
+            const terminal = document.getElementById('terminal');
+            const commandInput = document.getElementById('command-input');
+            
+            if (isKubernetes) {
+                podInfo.classList.remove('hidden');
+                terminal.classList.remove('hidden');
+                commandInput.classList.remove('hidden');
+                getPodInfo();
+            } else {
+                podInfo.classList.add('hidden');
+                terminal.classList.add('hidden');
+                commandInput.classList.add('hidden');
+            }
+            
+            // Refresh file tree for selected environment
+            refreshFileTree();
+            updateStatus(`Switched to ${isKubernetes ? 'Kubernetes' : 'Docker'} environment`);
+        }
+
+        // API request wrapper
+        async function apiRequest(endpoint, data) {
+            const identifier = PROJECT_ID ? { project_id: PROJECT_ID } : { conversation_id: CONVERSATION_ID };
+            const payload = { ...identifier, ...data };
+            
+            try {
+                updateStatus(`API request to ${endpoint}...`);
+                const url = `${API_BASE_URL}/coding/${isKubernetes ? 'k8s/' : ''}${endpoint}/`;
+                
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload),
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status} ${response.statusText}`);
+                }
+                
+                updateStatus(`API request to ${endpoint} completed`);
+                return await response.json();
+            } catch (error) {
+                console.error('API error:', error);
+                updateStatus(`Error: ${error.message}`, true);
+                return { error: error.message };
+            }
+        }
+
+        // Get Kubernetes pod information
+        async function getPodInfo() {
+            if (!isKubernetes) return;
+            
+            const data = await apiRequest('get_pod_info', {});
+            if (data.error) {
+                document.getElementById('pod-info-content').innerHTML = `<div class="status-error">Error: ${data.error}</div>`;
+                return;
+            }
+            
+            const statusClass = data.status === 'running' ? 'status-running' : 
+                              data.status === 'pending' ? 'status-pending' : 'status-error';
+            
+            let html = `
+                <div><strong>Name:</strong> ${data.pod_name}</div>
+                <div><strong>Namespace:</strong> ${data.namespace}</div>
+                <div><strong>Status:</strong> <span class="${statusClass}">${data.status}</span></div>
+                <div><strong>Image:</strong> ${data.image}</div>
+            `;
+            
+            if (data.service_details) {
+                html += `
+                    <div><strong>URL:</strong> <a href="${data.service_details.access_url}" target="_blank">${data.service_details.access_url}</a></div>
+                `;
+            }
+            
+            document.getElementById('pod-info-content').innerHTML = html;
+        }
+
+        // Refresh the file tree
+        async function refreshFileTree() {
+            const endpoint = isKubernetes ? 'get_file_tree' : 'get_file_tree';
+            const data = await apiRequest(endpoint, { directory: '/workspace' });
+            
+            if (data.error) {
+                document.getElementById('file-tree').innerHTML = `<div class="status-error">Error: ${data.error}</div>`;
+                return;
+            }
+            
+            currentFileTree = data.files;
+            renderFileTree(data.files);
+            
+            if (isKubernetes && data.pod_info) {
+                const statusClass = data.pod_info.status === 'running' ? 'status-running' : 
+                                  data.pod_info.status === 'pending' ? 'status-pending' : 'status-error';
+                
+                document.getElementById('pod-info-content').innerHTML = `
+                    <div><strong>Status:</strong> <span class="${statusClass}">${data.pod_info.status}</span></div>
+                    <div><strong>Pod:</strong> ${data.pod_info.pod_name}</div>
+                    <div><strong>Namespace:</strong> ${data.pod_info.namespace}</div>
+                `;
+            }
+        }
+
+        // Render the file tree
+        function renderFileTree(files) {
+            const fileTree = document.getElementById('file-tree');
+            fileTree.innerHTML = '';
+            
+            files.forEach(file => {
+                const item = document.createElement('div');
+                
+                if (file.type === 'directory') {
+                    item.className = 'tree-item tree-folder';
+                    item.innerHTML = `📁 ${file.name}`;
+                    
+                    // Create children container
+                    if (file.children && file.children.length > 0) {
+                        const childrenContainer = document.createElement('div');
+                        childrenContainer.className = 'tree-children';
+                        
+                        file.children.forEach(child => {
+                            const childItem = document.createElement('div');
+                            
+                            if (child.type === 'directory') {
+                                childItem.className = 'tree-item tree-folder';
+                                childItem.innerHTML = `📁 ${child.name}`;
+                                childItem.addEventListener('click', () => handleItemClick(child));
+                            } else {
+                                childItem.className = 'tree-item tree-file';
+                                childItem.innerHTML = `📄 ${child.name}`;
+                                childItem.addEventListener('click', () => handleItemClick(child));
+                            }
+                            
+                            childrenContainer.appendChild(childItem);
+                        });
+                        
+                        item.addEventListener('click', (e) => {
+                            if (e.target === item) {
+                                childrenContainer.classList.toggle('hidden');
+                            }
+                        });
+                        
+                        item.appendChild(childrenContainer);
+                    }
+                } else {
+                    item.className = 'tree-item tree-file';
+                    item.innerHTML = `📄 ${file.name}`;
+                    item.addEventListener('click', () => handleItemClick(file));
+                }
+                
+                fileTree.appendChild(item);
+            });
+        }
+
+        // Handle file tree item click
+        async function handleItemClick(item) {
+            if (item.type === 'directory') {
+                return;
+            }
+            
+            if (isModified) {
+                const confirm = window.confirm('You have unsaved changes. Load new file anyway?');
+                if (!confirm) return;
+            }
+            
+            const path = item.path;
+            loadFile(path);
+        }
+
+        // Load a file
+        async function loadFile(path) {
+            const endpoint = isKubernetes ? 'get_file_content' : 'get_file_content';
+            const data = await apiRequest(endpoint, { path });
+            
+            if (data.error) {
+                updateStatus(`Error loading file: ${data.error}`, true);
+                return;
+            }
+            
+            currentFilePath = path;
+            document.getElementById('current-file').textContent = path;
+            
+            // Set editor language based on file extension
+            const extension = path.split('.').pop().toLowerCase();
+            let language = 'plaintext';
+            
+            if (['js', 'jsx'].includes(extension)) language = 'javascript';
+            else if (['ts', 'tsx'].includes(extension)) language = 'typescript';
+            else if (['html', 'htm'].includes(extension)) language = 'html';
+            else if (['css'].includes(extension)) language = 'css';
+            else if (['json'].includes(extension)) language = 'json';
+            else if (['py'].includes(extension)) language = 'python';
+            else if (['md'].includes(extension)) language = 'markdown';
+            
+            // Update editor
+            const model = monaco.editor.createModel(data.content, language);
+            editor.setModel(model);
+            
+            isModified = false;
+            document.getElementById('save-button').disabled = true;
+            updateStatus(`Loaded file: ${path}`);
+        }
+
+        // Save the current file
+        async function saveCurrentFile() {
+            if (!currentFilePath) {
+                updateStatus('No file selected', true);
+                return;
+            }
+            
+            const content = editor.getValue();
+            const endpoint = isKubernetes ? 'save_file' : 'save_file';
+            
+            const data = await apiRequest(endpoint, {
+                path: currentFilePath,
+                content
+            });
+            
+            if (data.error) {
+                updateStatus(`Error saving file: ${data.error}`, true);
+                return;
+            }
+            
+            isModified = false;
+            document.getElementById('save-button').disabled = true;
+            updateStatus(`Saved file: ${currentFilePath}`);
+        }
+
+        // Create a new file
+        async function createNewFile() {
+            const filename = prompt('Enter new file name:');
+            if (!filename) return;
+            
+            const path = '/workspace/' + filename;
+            const endpoint = isKubernetes ? 'save_file' : 'save_file';
+            
+            const data = await apiRequest(endpoint, {
+                path,
+                content: ''
+            });
+            
+            if (data.error) {
+                updateStatus(`Error creating file: ${data.error}`, true);
+                return;
+            }
+            
+            refreshFileTree();
+            loadFile(path);
+            updateStatus(`Created file: ${path}`);
+        }
+
+        // Create a new folder
+        async function createNewFolder() {
+            const foldername = prompt('Enter new folder name:');
+            if (!foldername) return;
+            
+            const path = '/workspace/' + foldername;
+            const endpoint = isKubernetes ? 'create_folder' : 'create_folder';
+            
+            const data = await apiRequest(endpoint, { path });
+            
+            if (data.error) {
+                updateStatus(`Error creating folder: ${data.error}`, true);
+                return;
+            }
+            
+            refreshFileTree();
+            updateStatus(`Created folder: ${path}`);
+        }
+
+        // Run a command in the Kubernetes pod
+        async function runCommand() {
+            if (!isKubernetes) return;
+            
+            const commandInput = document.getElementById('command-text');
+            const command = commandInput.value.trim();
+            
+            if (!command) {
+                updateStatus('No command entered', true);
+                return;
+            }
+            
+            const terminal = document.getElementById('terminal');
+            terminal.innerHTML += `<div style="color: #8f8; margin-top: 5px;">$ ${command}</div>`;
+            terminal.scrollTop = terminal.scrollHeight;
+            
+            const data = await apiRequest('execute_command', { command });
+            
+            if (data.error) {
+                terminal.innerHTML += `<div style="color: #f88;">${data.error}</div>`;
+            } else {
+                if (data.stdout) {
+                    terminal.innerHTML += `<div>${data.stdout}</div>`;
+                }
+                if (data.stderr) {
+                    terminal.innerHTML += `<div style="color: #f88;">${data.stderr}</div>`;
+                }
+            }
+            
+            terminal.scrollTop = terminal.scrollHeight;
+            commandInput.value = '';
+        }
+
+        // Update status bar
+        function updateStatus(message, isError = false) {
+            const statusBar = document.getElementById('status-bar');
+            statusBar.textContent = message;
+            
+            if (isError) {
+                statusBar.style.backgroundColor = '#a00';
+            } else {
+                statusBar.style.backgroundColor = '#333';
+            }
+            
+            console.log(isError ? 'ERROR:' : 'STATUS:', message);
+        }
+    </script>
+</body>
+</html> 
