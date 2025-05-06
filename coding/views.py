@@ -11,6 +11,9 @@ from django.db.models import Q
 from .docker.docker_utils import get_sandbox_by_project_id
 from coding.k8s_manager import manage_kubernetes_pod, execute_command_in_pod, delete_kubernetes_pod
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 def editor(request):
     """
@@ -26,7 +29,14 @@ def editor(request):
             'message': 'Please provide either project_id or conversation_id as a URL parameter.'
         })
     
-    return render(request, 'coding/editor.html')
+    # Create context with project or conversation data
+    context = {
+        # Pass both IDs directly to the template
+        'project_id': project_id,
+        'conversation_id': conversation_id
+    }
+    
+    return render(request, 'coding/editor.html', context)
 
 @csrf_exempt
 def get_file_tree(request):
@@ -431,13 +441,21 @@ def get_k8s_file_tree(request):
             
             if not pod or pod.status != 'running':
                 # Try to create/start the pod if it doesn't exist or isn't running
-                success, pod = manage_kubernetes_pod(
+                success, pod, error_message = manage_kubernetes_pod(
                     project_id=project_id,
                     conversation_id=conversation_id
                 )
                 
                 if not success or not pod:
-                    return JsonResponse({'error': 'Failed to start Kubernetes pod'}, status=500)
+                    return JsonResponse({
+                        'error': 'Failed to start Kubernetes pod',
+                        'debug_info': {
+                            'project_id': project_id,
+                            'conversation_id': conversation_id,
+                            'pod_exists': pod is not None,
+                            'error_message': error_message
+                        }
+                    }, status=500)
             
             # Execute 'find' command to get file structure
             success, stdout, stderr = execute_command_in_pod(
@@ -582,13 +600,21 @@ def get_k8s_file_content(request):
         
         try:
             # Ensure the pod is running
-            success, pod = manage_kubernetes_pod(
+            success, pod, error_message = manage_kubernetes_pod(
                 project_id=project_id,
                 conversation_id=conversation_id
             )
             
             if not success or not pod:
-                return JsonResponse({'error': 'Failed to start Kubernetes pod'}, status=500)
+                return JsonResponse({
+                    'error': 'Failed to start Kubernetes pod',
+                    'debug_info': {
+                        'project_id': project_id,
+                        'conversation_id': conversation_id,
+                        'pod_exists': pod is not None,
+                        'error_message': error_message
+                    }
+                }, status=500)
             
             # Get absolute path
             abs_path = file_path
@@ -642,13 +668,21 @@ def save_k8s_file(request):
         
         try:
             # Ensure the pod is running
-            success, pod = manage_kubernetes_pod(
+            success, pod, error_message = manage_kubernetes_pod(
                 project_id=project_id,
                 conversation_id=conversation_id
             )
             
             if not success or not pod:
-                return JsonResponse({'error': 'Failed to start Kubernetes pod'}, status=500)
+                return JsonResponse({
+                    'error': 'Failed to start Kubernetes pod',
+                    'debug_info': {
+                        'project_id': project_id,
+                        'conversation_id': conversation_id,
+                        'pod_exists': pod is not None,
+                        'error_message': error_message
+                    }
+                }, status=500)
             
             # Get absolute path
             abs_path = file_path
@@ -714,13 +748,21 @@ def k8s_create_folder(request):
         
         try:
             # Ensure the pod is running
-            success, pod = manage_kubernetes_pod(
+            success, pod, error_message = manage_kubernetes_pod(
                 project_id=project_id,
                 conversation_id=conversation_id
             )
             
             if not success or not pod:
-                return JsonResponse({'error': 'Failed to start Kubernetes pod'}, status=500)
+                return JsonResponse({
+                    'error': 'Failed to start Kubernetes pod',
+                    'debug_info': {
+                        'project_id': project_id,
+                        'conversation_id': conversation_id,
+                        'pod_exists': pod is not None,
+                        'error_message': error_message
+                    }
+                }, status=500)
             
             # Get absolute path
             abs_path = folder_path
@@ -764,13 +806,21 @@ def k8s_delete_item(request):
         
         try:
             # Ensure the pod is running
-            success, pod = manage_kubernetes_pod(
+            success, pod, error_message = manage_kubernetes_pod(
                 project_id=project_id,
                 conversation_id=conversation_id
             )
             
             if not success or not pod:
-                return JsonResponse({'error': 'Failed to start Kubernetes pod'}, status=500)
+                return JsonResponse({
+                    'error': 'Failed to start Kubernetes pod',
+                    'debug_info': {
+                        'project_id': project_id,
+                        'conversation_id': conversation_id,
+                        'pod_exists': pod is not None,
+                        'error_message': error_message
+                    }
+                }, status=500)
             
             # Get absolute path
             abs_path = path
@@ -821,13 +871,21 @@ def k8s_rename_item(request):
         
         try:
             # Ensure the pod is running
-            success, pod = manage_kubernetes_pod(
+            success, pod, error_message = manage_kubernetes_pod(
                 project_id=project_id,
                 conversation_id=conversation_id
             )
             
             if not success or not pod:
-                return JsonResponse({'error': 'Failed to start Kubernetes pod'}, status=500)
+                return JsonResponse({
+                    'error': 'Failed to start Kubernetes pod',
+                    'debug_info': {
+                        'project_id': project_id,
+                        'conversation_id': conversation_id,
+                        'pod_exists': pod is not None,
+                        'error_message': error_message
+                    }
+                }, status=500)
             
             # Get absolute paths
             abs_old_path = old_path
@@ -880,7 +938,7 @@ def get_k8s_pod_info(request):
             return JsonResponse({'error': 'Either project_id or conversation_id must be provided'}, status=400)
         
         try:
-            # Get pod info from database
+            # Check DB for pod info first
             query = Q()
             if project_id:
                 query &= Q(project_id=str(project_id))
@@ -889,8 +947,74 @@ def get_k8s_pod_info(request):
             
             pod = KubernetesPod.objects.filter(query).first()
             
-            if not pod:
-                return JsonResponse({'error': 'No pod found'}, status=404)
+            # Define variables to track what's happening
+            pod_existed = pod is not None
+            pod_was_running = pod and pod.status == 'running'
+            
+            logger.info(f"Starting get_k8s_pod_info: db_record_exists={pod_existed}, was_running={pod_was_running}")
+            
+            # IMPORTANT OPTIMIZATION: If pod is in DB and marked as running, and has valid service details,
+            # we can skip the expensive K8s checks and management operations
+            if pod_existed and pod_was_running and pod.service_details and 'ttydUrl' in pod.service_details:
+                logger.info(f"Using existing pod info from database for {pod.pod_name} - skipping K8s operations")
+                
+                # Return pod info directly from DB
+                pod_info = {
+                    'pod_id': pod.id,
+                    'pod_name': pod.pod_name,
+                    'namespace': pod.namespace,
+                    'status': pod.status,
+                    'image': pod.image,
+                    'service_details': pod.service_details,
+                    'ttydUrl': pod.service_details.get('ttydUrl'),
+                    'from_cache': True
+                }
+                
+                # Add debug info
+                pod_info['debug_info'] = {
+                    'has_service_details': bool(pod.service_details),
+                    'service_details_keys': list(pod.service_details.keys()) if pod.service_details else [],
+                    'pod_existed': pod_existed,
+                    'pod_was_running': pod_was_running,
+                    'pod_name': pod.pod_name,
+                    'pod_namespace': pod.namespace,
+                    'skipped_k8s_check': True
+                }
+                
+                return JsonResponse(pod_info)
+            
+            # Only perform expensive K8s operations if necessary
+            # Ensure a pod is available and running - will check for existing resources first
+            success, pod, error_message = manage_kubernetes_pod(
+                project_id=project_id,
+                conversation_id=conversation_id,
+                image=pod.image if pod and pod.image else "gitpod/workspace-full:latest",
+                resource_limits=pod.resource_limits if pod and pod.resource_limits else None
+            )
+            
+            if not success or not pod:
+                return JsonResponse({
+                    'error': 'Failed to ensure Kubernetes pod is running',
+                    'debug_info': {
+                        'project_id': project_id,
+                        'conversation_id': conversation_id,
+                        'pod_exists': pod is not None,
+                        'error_message': error_message
+                    }
+                }, status=500)
+            
+            # Verify the pod is now running
+            if pod.status != 'running':
+                logger.error(f"Pod {pod.pod_name} is still not running after creation/start attempts")
+                return JsonResponse({
+                    'error': 'Pod is not running after creation/start attempts',
+                    'debug_info': {
+                        'pod_name': pod.pod_name,
+                        'status': pod.status,
+                        'existed_before': pod_existed,
+                        'was_running_before': pod_was_running
+                    }
+                }, status=500)
             
             # Extract pod info
             pod_info = {
@@ -898,16 +1022,65 @@ def get_k8s_pod_info(request):
                 'pod_name': pod.pod_name,
                 'namespace': pod.namespace,
                 'status': pod.status,
-                'image': pod.image
+                'image': pod.image,
+                'from_cache': False
             }
             
             # Add service details if available
             if pod.service_details:
+                # Log details about service_details for debugging
+                logger.info(f"Pod service_details: {pod.service_details}")
+                
+                # Add full service_details to response for debugging
                 pod_info['service_details'] = pod.service_details
+                
+                # Check for ttydUrl and directly expose it at the top level for easy access
+                if 'ttydUrl' in pod.service_details and pod.service_details.get('ttydUrl'):
+                    # Add ttydUrl directly to the response object for easier access in the frontend
+                    pod_info['ttydUrl'] = pod.service_details.get('ttydUrl')
+                else:
+                    # No ttydUrl found, check if ttydPort exists
+                    ttyd_port = pod.service_details.get('ttydPort')
+                    node_ip = pod.service_details.get('nodeIP')
+                    
+                    if ttyd_port and node_ip:
+                        # We have the ttyd port and node IP, but no direct URL - create it
+                        ttyd_url = f"http://{node_ip}:{ttyd_port}"
+                        pod_info['ttydUrl'] = ttyd_url
+                        
+                        # Also update the database record for next time
+                        pod.service_details['ttydUrl'] = ttyd_url
+                        pod.save(update_fields=['service_details'])
+                        
+                        logger.info(f"Created and saved missing ttydUrl: {ttyd_url}")
+                    else:
+                        # Log the missing information
+                        logger.warning(f"Missing ttydPort ({ttyd_port}) or nodeIP ({node_ip}) for pod {pod.pod_name}")
+                        pod_info['warning'] = 'Missing ttyd connection information'
+            else:
+                pod_info['warning'] = 'No service details available'
+                
+            # Add debug info
+            pod_info['debug_info'] = {
+                'has_service_details': bool(pod.service_details),
+                'service_details_keys': list(pod.service_details.keys()) if pod.service_details else [],
+                'pod_existed': pod_existed,
+                'pod_was_running': pod_was_running,
+                'pod_name': pod.pod_name,
+                'pod_namespace': pod.namespace
+            }
                 
             return JsonResponse(pod_info)
         except Exception as e:
-            return JsonResponse({'error': str(e)}, status=500)
+            logger.exception(f"Error in get_k8s_pod_info: {str(e)}")
+            return JsonResponse({
+                'error': str(e),
+                'debug_info': {
+                    'project_id': project_id,
+                    'conversation_id': conversation_id,
+                    'exception_type': type(e).__name__
+                }
+            }, status=500)
     
     return JsonResponse({'error': 'POST request expected'}, status=400)
 
@@ -931,13 +1104,21 @@ def k8s_execute_command(request):
         
         try:
             # Ensure the pod is running
-            success, pod = manage_kubernetes_pod(
+            success, pod, error_message = manage_kubernetes_pod(
                 project_id=project_id,
                 conversation_id=conversation_id
             )
             
             if not success or not pod:
-                return JsonResponse({'error': 'Failed to start Kubernetes pod'}, status=500)
+                return JsonResponse({
+                    'error': 'Failed to start Kubernetes pod',
+                    'debug_info': {
+                        'project_id': project_id,
+                        'conversation_id': conversation_id,
+                        'pod_exists': pod is not None,
+                        'error_message': error_message
+                    }
+                }, status=500)
             
             # Execute command
             success, stdout, stderr = execute_command_in_pod(

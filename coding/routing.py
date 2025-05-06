@@ -1,6 +1,6 @@
 from django.urls import re_path
-from . import views_terminal
 
+# We're now using ttyd directly for terminal access, so no WebSocket route is needed
 websocket_urlpatterns = [
-    re_path(r'^coding/k8s/terminal/$', views_terminal.TerminalConsumer.as_asgi()),
+    # Empty as we're using ttyd sidecar now
 ]
