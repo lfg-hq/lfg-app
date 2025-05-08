@@ -604,6 +604,8 @@ def get_k8s_file_content(request):
                 project_id=project_id,
                 conversation_id=conversation_id
             )
+
+            print(f"\n\n\n\nPod: {pod}")
             
             if not success or not pod:
                 return JsonResponse({
@@ -620,6 +622,8 @@ def get_k8s_file_content(request):
             abs_path = file_path
             if not file_path.startswith('/'):
                 abs_path = f"/workspace/{file_path}"
+
+            print(f"\n\n\n\nAbs path: {abs_path}")
             
             # Check if file exists
             success, exists_stdout, _ = execute_command_in_pod(
@@ -970,6 +974,10 @@ def get_k8s_pod_info(request):
                     'from_cache': True
                 }
                 
+                # Add filebrowserUrl to top level if available
+                if 'filebrowserUrl' in pod.service_details:
+                    pod_info['filebrowserUrl'] = pod.service_details.get('filebrowserUrl')
+                
                 # Add debug info
                 pod_info['debug_info'] = {
                     'has_service_details': bool(pod.service_details),
@@ -1057,6 +1065,26 @@ def get_k8s_pod_info(request):
                         # Log the missing information
                         logger.warning(f"Missing ttydPort ({ttyd_port}) or nodeIP ({node_ip}) for pod {pod.pod_name}")
                         pod_info['warning'] = 'Missing ttyd connection information'
+                
+                # Similarly add filebrowserUrl at the top level
+                if 'filebrowserUrl' in pod.service_details and pod.service_details.get('filebrowserUrl'):
+                    # Add filebrowserUrl directly to the response object
+                    pod_info['filebrowserUrl'] = pod.service_details.get('filebrowserUrl')
+                else:
+                    # No filebrowserUrl found, check if filebrowserPort exists
+                    filebrowser_port = pod.service_details.get('filebrowserPort')
+                    node_ip = pod.service_details.get('nodeIP')
+                    
+                    if filebrowser_port and node_ip:
+                        # We have the filebrowser port and node IP, but no direct URL - create it
+                        filebrowser_url = f"http://{node_ip}:{filebrowser_port}"
+                        pod_info['filebrowserUrl'] = filebrowser_url
+                        
+                        # Also update the database record for next time
+                        pod.service_details['filebrowserUrl'] = filebrowser_url
+                        pod.save(update_fields=['service_details'])
+                        
+                        logger.info(f"Created and saved missing filebrowserUrl: {filebrowser_url}")
             else:
                 pod_info['warning'] = 'No service details available'
                 
@@ -1134,5 +1162,92 @@ def k8s_execute_command(request):
             })
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=500)
+    
+    return JsonResponse({'error': 'POST request expected'}, status=400)
+
+@csrf_exempt
+def get_filebrowser_url(request):
+    """
+    API endpoint to get the filebrowser URL for a Kubernetes pod
+    """
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        project_id = data.get('project_id')
+        conversation_id = data.get('conversation_id')
+        
+        # Validate input
+        if not (project_id or conversation_id):
+            return JsonResponse({'error': 'Either project_id or conversation_id must be provided'}, status=400)
+        
+        try:
+            # Check DB for pod info first
+            query = Q()
+            if project_id:
+                query &= Q(project_id=str(project_id))
+            elif conversation_id:
+                query &= Q(conversation_id=str(conversation_id))
+            
+            pod = KubernetesPod.objects.filter(query).first()
+            
+            if not pod:
+                return JsonResponse({'error': 'No pod found for the given project or conversation'}, status=404)
+            
+            # Check if pod is running
+            if pod.status != 'running':
+                return JsonResponse({'error': f'Pod is not running (status: {pod.status})'}, status=400)
+            
+            # Extract filebrowser URL from service details
+            if pod.service_details and 'filebrowserUrl' in pod.service_details:
+                filebrowser_url = pod.service_details.get('filebrowserUrl')
+                return JsonResponse({
+                    'filebrowserUrl': filebrowser_url,
+                    'pod_name': pod.pod_name,
+                    'namespace': pod.namespace
+                })
+            
+            # If filebrowserUrl is not directly available, try to construct it
+            if pod.service_details:
+                filebrowser_port = pod.service_details.get('filebrowserPort')
+                node_ip = pod.service_details.get('nodeIP')
+                
+                if filebrowser_port and node_ip:
+                    # Construct filebrowser URL
+                    filebrowser_url = f"http://{node_ip}:{filebrowser_port}"
+                    
+                    # Update the pod record for future requests
+                    pod.service_details['filebrowserUrl'] = filebrowser_url
+                    pod.save(update_fields=['service_details'])
+                    
+                    logger.info(f"Created and saved missing filebrowserUrl: {filebrowser_url}")
+                    
+                    return JsonResponse({
+                        'filebrowserUrl': filebrowser_url,
+                        'pod_name': pod.pod_name,
+                        'namespace': pod.namespace
+                    })
+                else:
+                    # Log the missing information
+                    logger.warning(f"Missing filebrowserPort or nodeIP for pod {pod.pod_name}")
+                    return JsonResponse({
+                        'error': 'Missing filebrowser connection information',
+                        'debug_info': {
+                            'has_filebrowser_port': bool(filebrowser_port),
+                            'has_node_ip': bool(node_ip),
+                            'service_details': pod.service_details
+                        }
+                    }, status=400)
+            else:
+                return JsonResponse({'error': 'No service details available for this pod'}, status=400)
+                
+        except Exception as e:
+            logger.exception(f"Error in get_filebrowser_url: {str(e)}")
+            return JsonResponse({
+                'error': str(e),
+                'debug_info': {
+                    'project_id': project_id,
+                    'conversation_id': conversation_id,
+                    'exception_type': type(e).__name__
+                }
+            }, status=500)
     
     return JsonResponse({'error': 'POST request expected'}, status=400)

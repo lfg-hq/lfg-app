@@ -8,7 +8,7 @@ import json
 import logging
 import paramiko
 from django.conf import settings
-from ..models import KubernetesPod
+from ..models import KubernetesPod, KubernetesPortMapping
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -215,66 +215,41 @@ def check_pod_status(client, namespace, pod_name=None):
             client, f"kubectl get namespace {namespace} || kubectl create namespace {namespace}"
         )
         
-        # Get pod info
-        if pod_name:
-            # Check specific pod
-            success, stdout, stderr = execute_remote_command(
-                client, f"kubectl get pod {pod_name} -n {namespace} -o json"
-            )
-        else:
-            # Get first pod in namespace
-            success, stdout, stderr = execute_remote_command(
-                client, f"kubectl get pods -n {namespace} -o json"
-            )
+        # First check for any pods with the app label for this namespace
+        success, stdout, stderr = execute_remote_command(
+            client, f"kubectl get pods -n {namespace} -l app={namespace} -o json"
+        )
         
-        if not success:
-            return False, False, {}
-        
-        try:
-            pod_data = json.loads(stdout)
-            
-            if pod_name:
-                # Single pod data
-                if pod_data.get('metadata', {}).get('name'):
-                    phase = pod_data.get('status', {}).get('phase', '')
-                    
-                    # Check that the phase is "Running"
-                    if phase.lower() != 'running':
-                        logger.info(f"Pod {pod_name} phase is {phase}, not Running")
-                        return True, False, pod_data
-                    
-                    # Also check that all containers are ready
-                    container_statuses = pod_data.get('status', {}).get('containerStatuses', [])
-                    all_containers_ready = True
-                    
-                    for container in container_statuses:
-                        if not container.get('ready', False):
-                            container_name = container.get('name', 'unknown')
-                            state = container.get('state', {})
-                            reason = "unknown"
-                            
-                            # Check for container state reasons
-                            if 'waiting' in state:
-                                reason = state['waiting'].get('reason', 'waiting')
-                            elif 'terminated' in state:
-                                reason = state['terminated'].get('reason', 'terminated')
-                            
-                            logger.warning(f"Container {container_name} in pod {pod_name} is not ready. State: {reason}")
-                            all_containers_ready = False
-                    
-                    # Only consider pod running if phase is Running AND all containers are ready
-                    return True, phase.lower() == 'running' and all_containers_ready, pod_data
-            else:
-                # List of pods
+        if success:
+            try:
+                pod_data = json.loads(stdout)
                 pods = pod_data.get('items', [])
+                
                 if pods:
-                    pod = pods[0]  # Get first pod
-                    pod_name = pod.get('metadata', {}).get('name', '')
+                    # We found pods with the app label, use the first one
+                    pod = pods[0]
+                    actual_pod_name = pod.get('metadata', {}).get('name', '')
+                    logger.info(f"Found pod with app={namespace} label: {actual_pod_name}")
+                    
+                    # If a specific pod_name was requested, check if it matches any of the found pods
+                    if pod_name:
+                        matching_pod = None
+                        for p in pods:
+                            if p.get('metadata', {}).get('name') == pod_name:
+                                matching_pod = p
+                                break
+                        
+                        # If we found the specific pod requested, use it instead
+                        if matching_pod:
+                            pod = matching_pod
+                            actual_pod_name = pod_name
+                            logger.info(f"Using specifically requested pod: {pod_name}")
+                    
                     phase = pod.get('status', {}).get('phase', '')
                     
                     # Check that the phase is "Running"
                     if phase.lower() != 'running':
-                        logger.info(f"Pod {pod_name} phase is {phase}, not Running")
+                        logger.info(f"Pod {actual_pod_name} phase is {phase}, not Running")
                         return True, False, pod
                     
                     # Also check that all containers are ready
@@ -293,13 +268,97 @@ def check_pod_status(client, namespace, pod_name=None):
                             elif 'terminated' in state:
                                 reason = state['terminated'].get('reason', 'terminated')
                             
-                            logger.warning(f"Container {container_name} in pod {pod_name} is not ready. State: {reason}")
+                            logger.warning(f"Container {container_name} in pod {actual_pod_name} is not ready. State: {reason}")
                             all_containers_ready = False
                     
                     # Only consider pod running if phase is Running AND all containers are ready
                     return True, phase.lower() == 'running' and all_containers_ready, pod
-        except json.JSONDecodeError:
-            logger.error(f"Failed to parse pod JSON data: {stdout}")
+                
+                # If no pods found with app label but a specific pod_name was requested, try to find it directly
+                if pod_name:
+                    logger.info(f"No pods found with app={namespace} label, checking for specific pod {pod_name}")
+                    success, stdout, stderr = execute_remote_command(
+                        client, f"kubectl get pod {pod_name} -n {namespace} -o json"
+                    )
+                    
+                    if success:
+                        try:
+                            pod_data = json.loads(stdout)
+                            
+                            if pod_data.get('metadata', {}).get('name'):
+                                phase = pod_data.get('status', {}).get('phase', '')
+                                
+                                # Check that the phase is "Running"
+                                if phase.lower() != 'running':
+                                    logger.info(f"Pod {pod_name} phase is {phase}, not Running")
+                                    return True, False, pod_data
+                                
+                                # Also check that all containers are ready
+                                container_statuses = pod_data.get('status', {}).get('containerStatuses', [])
+                                all_containers_ready = True
+                                
+                                for container in container_statuses:
+                                    if not container.get('ready', False):
+                                        container_name = container.get('name', 'unknown')
+                                        state = container.get('state', {})
+                                        reason = "unknown"
+                                        
+                                        # Check for container state reasons
+                                        if 'waiting' in state:
+                                            reason = state['waiting'].get('reason', 'waiting')
+                                        elif 'terminated' in state:
+                                            reason = state['terminated'].get('reason', 'terminated')
+                                        
+                                        logger.warning(f"Container {container_name} in pod {pod_name} is not ready. State: {reason}")
+                                        all_containers_ready = False
+                                
+                                # Only consider pod running if phase is Running AND all containers are ready
+                                return True, phase.lower() == 'running' and all_containers_ready, pod_data
+                        except json.JSONDecodeError:
+                            logger.error(f"Failed to parse pod JSON data: {stdout}")
+                
+                # If we get here, we didn't find any pods with app label or the specific pod_name
+                logger.info(f"No pods found in namespace {namespace}")
+                return False, False, {}
+                
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse pod JSON data: {stdout}")
+        
+        # Fallback: look for any pods in the namespace
+        logger.info(f"Looking for any pods in namespace {namespace}")
+        success, stdout, stderr = execute_remote_command(
+            client, f"kubectl get pods -n {namespace} -o json"
+        )
+        
+        if success:
+            try:
+                pod_data = json.loads(stdout)
+                pods = pod_data.get('items', [])
+                
+                if pods:
+                    # Use the first pod we find
+                    pod = pods[0]
+                    actual_pod_name = pod.get('metadata', {}).get('name', '')
+                    logger.info(f"Found pod in namespace: {actual_pod_name}")
+                    
+                    phase = pod.get('status', {}).get('phase', '')
+                    
+                    if phase.lower() != 'running':
+                        logger.info(f"Pod {actual_pod_name} phase is {phase}, not Running")
+                        return True, False, pod
+                    
+                    # Check container readiness
+                    container_statuses = pod.get('status', {}).get('containerStatuses', [])
+                    all_containers_ready = True
+                    
+                    for container in container_statuses:
+                        if not container.get('ready', False):
+                            all_containers_ready = False
+                            break
+                    
+                    return True, phase.lower() == 'running' and all_containers_ready, pod
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse pod JSON data: {stdout}")
         
         return False, False, {}
     except Exception as e:
@@ -654,6 +713,17 @@ spec:
         volumeMounts:
         - name: user-data
           mountPath: /workspace
+      - name: filebrowser
+        image: filebrowser/filebrowser:latest
+        command: ["/filebrowser"]
+        args: ["--noauth", "--address", "0.0.0.0", "--port", "8080", "--root", "/workspace"]
+        ports:
+        - containerPort: 8080
+          name: filebrowser
+          protocol: TCP
+        volumeMounts:
+        - name: user-data
+          mountPath: /workspace
       volumes:
       - name: user-data
         persistentVolumeClaim:
@@ -770,6 +840,10 @@ spec:
   - port: 7681
     targetPort: 7681
     name: ttyd
+    protocol: TCP
+  - port: 8090
+    targetPort: 8080
+    name: filebrowser
     protocol: TCP
   selector:
     app: {namespace}
@@ -894,6 +968,41 @@ spec:
                     "url": f"http://{node_ip}:{http_port}" if http_port else None,
                     "ttydUrl": f"http://{node_ip}:{ttyd_port}" if ttyd_port else None
                 }
+                
+                # Get filebrowser nodePort
+                success, stdout, stderr = execute_remote_command(
+                    client, f"kubectl get service {service_name} -n {namespace} -o jsonpath='{{.spec.ports[?(@.name==\"filebrowser\")].nodePort}}'"
+                )
+                
+                filebrowser_port = stdout.strip() if success and stdout else None
+                logger.info(f"Retrieved filebrowser nodePort: {filebrowser_port}")
+                
+                # If we couldn't get the filebrowser port, try again with a different approach
+                if not filebrowser_port:
+                    logger.warning("Could not get filebrowser port with jsonpath, trying alternative method")
+                    success, stdout, stderr = execute_remote_command(
+                        client, f"kubectl get service {service_name} -n {namespace} -o yaml | grep -A 3 'name: filebrowser' | grep nodePort | awk '{{print $2}}'"
+                    )
+                    filebrowser_port = stdout.strip() if success and stdout else None
+                    logger.info(f"Alternative method filebrowser nodePort: {filebrowser_port}")
+                    
+                    # If still no filebrowser port, try one more method
+                    if not filebrowser_port:
+                        success, stdout, stderr = execute_remote_command(
+                            client, f"kubectl get service {service_name} -n {namespace} -o json | grep -A 10 '\"name\": \"filebrowser\"' | grep nodePort"
+                        )
+                        # Parse the JSON nodePort value
+                        if success and stdout:
+                            import re
+                            port_match = re.search(r'"nodePort":\s*(\d+)', stdout)
+                            if port_match:
+                                filebrowser_port = port_match.group(1)
+                                logger.info(f"Final attempt filebrowser nodePort: {filebrowser_port}")
+                
+                # Add filebrowser info to service details
+                if filebrowser_port:
+                    service_details["filebrowserPort"] = filebrowser_port
+                    service_details["filebrowserUrl"] = f"http://{node_ip}:{filebrowser_port}"
                 
                 logger.info(f"Service details: {service_details}")
                 
@@ -1077,7 +1186,7 @@ def manage_kubernetes_pod(project_id=None, conversation_id=None, image="gitpod/w
             
             # Generate a unique namespace for this project/conversation
             namespace = generate_namespace(project_id, conversation_id)
-            pod_name = f"{namespace}-pod"
+            expected_pod_name = f"{namespace}-pod"
             deployment_name = f"{namespace}-dep"
             
             # First check if there's a deployment in the namespace
@@ -1085,11 +1194,19 @@ def manage_kubernetes_pod(project_id=None, conversation_id=None, image="gitpod/w
             logger.info(f"Deployment check: exists={deployment_exists}")
             
             # If a deployment exists, check if pods are running
-            exists_in_k8s, running_in_k8s, pod_details = check_pod_status(client, namespace, pod_name)
-            logger.info(f"Kubernetes pod check: exists={exists_in_k8s}, running={running_in_k8s}")
+            # Don't specify pod_name here - we want to find any pod in the namespace
+            exists_in_k8s, running_in_k8s, pod_details = check_pod_status(client, namespace)
+            
+            # If we found pod details, get the actual pod name
+            actual_pod_name = None
+            if pod_details:
+                actual_pod_name = pod_details.get('metadata', {}).get('name', '')
+                logger.info(f"Found pod in K8s: {actual_pod_name}, running={running_in_k8s}")
+            else:
+                logger.info(f"No pod found in K8s for namespace {namespace}")
             
             # We have four cases to handle:
-            # 1. Pod exists in DB and is running in K8s -> Just update DB record
+            # 1. Pod exists in DB and is running in K8s -> Just update DB record with actual pod name
             # 2. Pod exists in DB but not running in K8s -> Start or recreate pod
             # 3. Pod doesn't exist in DB but exists in K8s -> Create DB record for existing pod
             # 4. Pod doesn't exist anywhere -> Create new pod and DB record
@@ -1100,12 +1217,10 @@ def manage_kubernetes_pod(project_id=None, conversation_id=None, image="gitpod/w
                 
                 # If we found pod details, use them
                 if pod_details:
-                    actual_pod_name = pod_details.get('metadata', {}).get('name', pod_name)
                     containers = pod_details.get('spec', {}).get('containers', [{}])
                     actual_image = containers[0].get('image', image) if containers else image
                 else:
                     # Otherwise use default values
-                    actual_pod_name = pod_name
                     actual_image = image
                 
                 # Ensure actual_image is never None or empty, use default if needed
@@ -1119,7 +1234,7 @@ def manage_kubernetes_pod(project_id=None, conversation_id=None, image="gitpod/w
                     project_id=project_id,
                     conversation_id=conversation_id,
                     namespace=namespace,
-                    pod_name=actual_pod_name,
+                    pod_name=actual_pod_name or expected_pod_name,
                     image=actual_image,
                     status='running' if running_in_k8s else 'created',
                     resource_limits=resource_limits,
@@ -1137,7 +1252,12 @@ def manage_kubernetes_pod(project_id=None, conversation_id=None, image="gitpod/w
                         pod.service_details = service_details
                 
                 pod.save()
-                logger.info(f"Created database record for existing Kubernetes pod {actual_pod_name}")
+                
+                # Create port mapping records for the pod
+                service_name = f"{namespace}-service"
+                create_port_mappings(pod, service_details if 'service_details' in locals() else {}, service_name)
+                
+                logger.info(f"Created database record for existing Kubernetes pod {pod.pod_name}")
                 
                 if running_in_k8s:
                     return True, pod, None
@@ -1145,6 +1265,13 @@ def manage_kubernetes_pod(project_id=None, conversation_id=None, image="gitpod/w
             # Case 1: Pod exists in both DB and K8s and is running
             if pod and exists_in_k8s and running_in_k8s:
                 logger.info(f"Pod {pod.pod_name} is already running in namespace {pod.namespace}")
+                
+                # Update pod name in database if it doesn't match actual pod name in K8s
+                # This is important if the pod was created by a deployment with a different name format
+                if actual_pod_name and pod.pod_name != actual_pod_name:
+                    logger.info(f"Updating pod name in database from {pod.pod_name} to {actual_pod_name}")
+                    pod.pod_name = actual_pod_name
+                
                 # Update status if needed
                 if pod.status != 'running':
                     pod.mark_as_running()
@@ -1230,7 +1357,14 @@ def manage_kubernetes_pod(project_id=None, conversation_id=None, image="gitpod/w
                                     execute_remote_command(client, f"kubectl rollout status deployment/{deployment_name} -n {namespace} --timeout=60s")
                                     
                                     # Since we patched the deployment, we should refresh running status
-                                    exists_in_k8s, running_in_k8s, pod_details = check_pod_status(client, namespace, pod_name)
+                                    exists_in_k8s, running_in_k8s, pod_details = check_pod_status(client, namespace)
+                                    if pod_details:
+                                        actual_pod_name = pod_details.get('metadata', {}).get('name', '')
+                                        # Update pod name in database if it has changed
+                                        if actual_pod_name and pod.pod_name != actual_pod_name:
+                                            logger.info(f"Updating pod name after rollout from {pod.pod_name} to {actual_pod_name}")
+                                            pod.pod_name = actual_pod_name
+                                    
                                     logger.info(f"After patching: pod exists={exists_in_k8s}, running={running_in_k8s}")
                                 else:
                                     logger.error(f"Failed to patch existing ttyd container: {stderr}")
@@ -1246,12 +1380,16 @@ def manage_kubernetes_pod(project_id=None, conversation_id=None, image="gitpod/w
                 # Update SSH connection details
                 pod.ssh_connection_details = get_k8s_server_settings()
                 
-                # Refresh service details
+                # Refresh service details - use actual pod name we found in K8s
                 success, _, service_details = get_pod_service_details(client, namespace, pod.pod_name)
                 if success and service_details:
                     pod.service_details = service_details
                 
                 pod.save()
+                
+                # Create port mapping records for the pod
+                service_name = f"{namespace}-service"
+                create_port_mappings(pod, service_details if 'service_details' in locals() else {}, service_name)
                 
                 logger.info(f"Updated pod {pod.pod_name} with latest access details")
                 return True, pod, None
@@ -1265,6 +1403,15 @@ def manage_kubernetes_pod(project_id=None, conversation_id=None, image="gitpod/w
                 
                 if pod_started:
                     logger.info(f"Successfully started pod {pod.pod_name}")
+                    
+                    # Check for actual pod name after restart
+                    exists_in_k8s, running_in_k8s, pod_details = check_pod_status(client, namespace)
+                    if pod_details:
+                        actual_pod_name = pod_details.get('metadata', {}).get('name', '')
+                        # Update pod name in database if it has changed
+                        if actual_pod_name and pod.pod_name != actual_pod_name:
+                            logger.info(f"Updating pod name after restart from {pod.pod_name} to {actual_pod_name}")
+                            pod.pod_name = actual_pod_name
                     
                     # Update pod status
                     pod.mark_as_running()
@@ -1291,22 +1438,22 @@ def manage_kubernetes_pod(project_id=None, conversation_id=None, image="gitpod/w
                 logger.info(f"Using existing pod resource limits for creation/recreation")
             
             # Create the pod in Kubernetes
-            success, pod_name, service_details = create_kubernetes_pod(client, namespace, image, resource_limits)
+            success, actual_pod_name, service_details = create_kubernetes_pod(client, namespace, image, resource_limits)
             
             if not success:
-                logger.error(f"Failed to create pod: {pod_name}")
+                logger.error(f"Failed to create pod: {actual_pod_name}")
                 if pod:
                     pod.mark_as_error()
-                return False, pod, f"Failed to create pod: {pod_name}"
+                return False, pod, f"Failed to create pod: {actual_pod_name}"
             
             # If pod doesn't exist in database yet, create it now
             if not pod:
-                logger.info(f"Creating new pod record in database for {pod_name}")
+                logger.info(f"Creating new pod record in database for {actual_pod_name}")
                 pod = KubernetesPod(
                     project_id=project_id,
                     conversation_id=conversation_id,
                     namespace=namespace,
-                    pod_name=pod_name or f"{namespace}-pod",
+                    pod_name=actual_pod_name or expected_pod_name,
                     image=image,
                     status='created',
                     resource_limits=resource_limits,
@@ -1317,8 +1464,8 @@ def manage_kubernetes_pod(project_id=None, conversation_id=None, image="gitpod/w
                     token=k8s_access_config.get('token')
                 )
             
-            # Update pod record
-            pod.pod_name = pod_name or pod.pod_name
+            # Update pod record with actual pod name from K8s
+            pod.pod_name = actual_pod_name or pod.pod_name
             pod.namespace = namespace
             pod.service_details = service_details or {}
             pod.mark_as_running()
@@ -1359,6 +1506,10 @@ def manage_kubernetes_pod(project_id=None, conversation_id=None, image="gitpod/w
             
             # Save the pod record
             pod.save()
+            
+            # Create port mapping records for the pod
+            service_name = f"{namespace}-service"
+            create_port_mappings(pod, service_details, service_name)
             
             logger.info(f"Pod {pod.pod_name} created successfully in namespace {namespace}")
             logger.info(f"Pod has cluster_host: {pod.cluster_host or 'Not set'}, token: {'Set' if pod.token else 'Not set'}")
@@ -1434,19 +1585,32 @@ def execute_command_in_pod(project_id=None, conversation_id=None, command=None):
             return False, "", "Failed to create SSH connection to Kubernetes server"
         
         try:
-            # Check if pod is running
-            exists, running, pod_details = check_pod_status(client, pod.namespace, pod.pod_name)
+            # Check if pod is running - but don't specify pod name to get any pod with app label
+            exists, running, pod_details = check_pod_status(client, pod.namespace)
+            
+            # If we found a pod but it's not the one in our database, update our record
+            actual_pod_name = pod.pod_name
+            if exists and pod_details:
+                found_pod_name = pod_details.get('metadata', {}).get('name', '')
+                if found_pod_name and found_pod_name != pod.pod_name:
+                    logger.info(f"Found different pod name in K8s ({found_pod_name}) than in database ({pod.pod_name})")
+                    actual_pod_name = found_pod_name
+                    
+                    # Update database record with actual pod name
+                    pod.pod_name = actual_pod_name
+                    pod.save(update_fields=['pod_name'])
+                    logger.info(f"Updated pod name in database to {actual_pod_name}")
             
             if not exists:
-                logger.error(f"Pod {pod.pod_name} not found in namespace {pod.namespace}")
-                return False, "", f"Pod {pod.pod_name} not found in namespace {pod.namespace}"
+                logger.error(f"No pod found in namespace {pod.namespace}")
+                return False, "", f"No pod found in namespace {pod.namespace}"
             
             if not running:
-                logger.error(f"Pod {pod.pod_name} exists but is not running")
-                return False, "", f"Pod {pod.pod_name} exists but is not running"
+                logger.error(f"Pod exists in namespace {pod.namespace} but is not running")
+                return False, "", f"Pod exists in namespace {pod.namespace} but is not running"
             
-            # Execute command in pod
-            k8s_command = f"kubectl exec -n {pod.namespace} {pod.pod_name} -- {command}"
+            # Execute command in pod using the actual pod name (from K8s)
+            k8s_command = f"kubectl exec -n {pod.namespace} {actual_pod_name} -- {command}"
             success, stdout, stderr = execute_remote_command(client, k8s_command)
             
             return success, stdout, stderr
@@ -1617,7 +1781,26 @@ def start_kubernetes_pod(client, namespace, pod_name):
     """
     logger.info(f"Attempting to start pod {pod_name} in namespace {namespace}")
     
-    # Check if the pod actually exists
+    # First check if any pod with the app label exists and is running
+    success, stdout, stderr = execute_remote_command(
+        client, f"kubectl get pods -n {namespace} -l app={namespace} -o jsonpath='{{.items[*].metadata.name}}'"
+    )
+    
+    if success and stdout:
+        pod_names = stdout.strip().split()
+        logger.info(f"Found {len(pod_names)} pods with app={namespace} label: {pod_names}")
+        
+        # Check if any of these pods are running
+        for found_pod in pod_names:
+            success, stdout, stderr = execute_remote_command(
+                client, f"kubectl get pod {found_pod} -n {namespace} -o jsonpath='{{.status.phase}}'"
+            )
+            
+            if success and stdout.strip() == 'Running':
+                logger.info(f"Pod {found_pod} is already running")
+                return True
+    
+    # Check if the specific pod exists
     success, stdout, stderr = execute_remote_command(
         client, f"kubectl get pod {pod_name} -n {namespace} -o jsonpath='{{.status.phase}}' 2>/dev/null || echo 'NotFound'"
     )
@@ -1626,16 +1809,38 @@ def start_kubernetes_pod(client, namespace, pod_name):
     logger.info(f"Pod {pod_name} current status: {pod_status}")
     
     if pod_status == 'NotFound':
-        logger.error(f"Pod {pod_name} not found in namespace {namespace}")
-        return False
-    
-    if pod_status == 'Running':
+        logger.info(f"Pod {pod_name} not found in namespace {namespace}, will check if deployment exists")
+        
+        # Check if a deployment exists that should create this pod
+        deployment_name = f"{namespace}-dep"
+        success, stdout, stderr = execute_remote_command(
+            client, f"kubectl get deployment {deployment_name} -n {namespace} 2>/dev/null || echo 'NotFound'"
+        )
+        
+        if 'NotFound' in stdout:
+            logger.error(f"No deployment found in namespace {namespace} to create pods")
+            return False
+        
+        logger.info(f"Deployment exists, will scale it to force pod recreation")
+        
+        # Scale down and up to force pod recreation
+        execute_remote_command(
+            client, f"kubectl scale deployment {deployment_name} -n {namespace} --replicas=0"
+        )
+        
+        # Wait for pods to be terminated
+        logger.info("Waiting for pods to be terminated...")
+        execute_remote_command(client, "sleep 3")
+        
+        # Scale back up
+        execute_remote_command(
+            client, f"kubectl scale deployment {deployment_name} -n {namespace} --replicas=1"
+        )
+    elif pod_status == 'Running':
         logger.info(f"Pod {pod_name} is already running")
         return True
-    
-    # If pod exists but is not running, try to start it
-    if pod_status in ['Pending', 'Failed', 'Succeeded', 'Unknown']:
-        # Delete the pod but keep its configuration (deployment will recreate it)
+    else:
+        # If pod exists but is not running, try to restart it
         logger.info(f"Deleting non-running pod {pod_name} so it can be recreated by deployment")
         execute_remote_command(
             client, f"kubectl delete pod {pod_name} -n {namespace} --grace-period=0 --force"
@@ -1654,80 +1859,133 @@ def start_kubernetes_pod(client, namespace, pod_name):
                 
             logger.info("Pod still exists, waiting...")
             execute_remote_command(client, "sleep 3")
+    
+    # Wait for a new pod to be created and become ready
+    logger.info("Waiting for pod to be created and started...")
+    new_pod_running = False
+    
+    for i in range(10):  # Wait up to 60 seconds for the pod to start
+        # Find any pod in the namespace with the app label
+        success, stdout, stderr = execute_remote_command(
+            client, f"kubectl get pods -n {namespace} -l app={namespace} -o jsonpath='{{.items[0].metadata.name}}'"
+        )
         
-        # Wait for the deployment to recreate the pod
-        logger.info("Waiting for pod to be recreated and started...")
-        new_pod_running = False
-        
-        for i in range(10):  # Wait up to 60 seconds for the pod to start
-            # Find any pod in the namespace with the app label
+        if success and stdout:
+            new_pod_name = stdout.strip()
+            logger.info(f"Found pod: {new_pod_name}")
+            
+            # Check if the pod is running
             success, stdout, stderr = execute_remote_command(
-                client, f"kubectl get pods -n {namespace} -l app={namespace} -o jsonpath='{{.items[0].metadata.name}}'"
+                client, f"kubectl get pod {new_pod_name} -n {namespace} -o jsonpath='{{.status.phase}}'"
             )
             
-            if success and stdout:
-                new_pod_name = stdout.strip()
-                logger.info(f"Found pod: {new_pod_name}")
+            if success and stdout.strip() == 'Running':
+                logger.info(f"Pod {new_pod_name} phase is Running, checking container readiness...")
                 
-                # Check if the pod is running
+                # Check if all containers are ready
                 success, stdout, stderr = execute_remote_command(
-                    client, f"kubectl get pod {new_pod_name} -n {namespace} -o jsonpath='{{.status.phase}}'"
+                    client, f"kubectl get pod {new_pod_name} -n {namespace} -o jsonpath='{{.status.containerStatuses[*].ready}}'"
                 )
                 
-                if success and stdout.strip() == 'Running':
-                    logger.info(f"Pod {new_pod_name} phase is Running, checking container readiness...")
+                if success and stdout:
+                    # The output is a space-separated list of boolean values for each container
+                    container_ready_states = stdout.strip().split()
+                    all_ready = all(state == "true" for state in container_ready_states)
                     
-                    # Check if all containers are ready
-                    success, stdout, stderr = execute_remote_command(
-                        client, f"kubectl get pod {new_pod_name} -n {namespace} -o jsonpath='{{.status.containerStatuses[*].ready}}'"
-                    )
-                    
-                    if success and stdout:
-                        # The output is a space-separated list of boolean values for each container
-                        container_ready_states = stdout.strip().split()
-                        all_ready = all(state == "true" for state in container_ready_states)
+                    if not all_ready:
+                        logger.warning(f"Not all containers in pod {new_pod_name} are ready: {stdout}")
                         
-                        if not all_ready:
-                            logger.warning(f"Not all containers in pod {new_pod_name} are ready: {stdout}")
-                            
-                            # Get more detailed information about container status
-                            execute_remote_command(
-                                client, f"kubectl get pod {new_pod_name} -n {namespace} -o jsonpath='{{.status.containerStatuses}}'"
-                            )
-                            
-                            # Continue to the next attempt
-                            execute_remote_command(client, "sleep 6")
-                            continue
-                    
-                    logger.info(f"Pod {new_pod_name} is now running with all containers ready")
-                    new_pod_running = True
-                    break
-            
-            logger.info("No pod found yet, waiting for deployment to create one...")
-            
-            execute_remote_command(client, "sleep 6")
+                        # Get more detailed information about container status
+                        execute_remote_command(
+                            client, f"kubectl get pod {new_pod_name} -n {namespace} -o jsonpath='{{.status.containerStatuses}}'"
+                        )
+                        
+                        # Continue to the next attempt
+                        execute_remote_command(client, "sleep 6")
+                        continue
+                
+                logger.info(f"Pod {new_pod_name} is now running with all containers ready")
+                new_pod_running = True
+                break
         
-        return new_pod_running
+        logger.info("No pod found yet, waiting for deployment to create one...")
+        
+        execute_remote_command(client, "sleep 6")
     
-    logger.error(f"Failed to start pod {pod_name} in namespace {namespace}")
-    return False
+    if not new_pod_running:
+        logger.error(f"Failed to start pod in namespace {namespace} after multiple attempts")
+        
+        # Let's check the deployment events for debugging
+        deployment_name = f"{namespace}-dep"
+        execute_remote_command(
+            client, f"kubectl describe deployment {deployment_name} -n {namespace}"
+        )
+        
+        # Check events in the namespace
+        execute_remote_command(
+            client, f"kubectl get events -n {namespace} --sort-by=.lastTimestamp"
+        )
+    
+    return new_pod_running
 
 
-def get_pod_service_details(client, namespace, pod_name):
+def get_pod_service_details(client, namespace, pod_name=None):
     """
     Get service details for a running pod.
     
     Args:
         client (paramiko.SSHClient): SSH client
         namespace (str): Kubernetes namespace
-        pod_name (str): Name of the pod
+        pod_name (str, optional): Name of the pod
         
     Returns:
         tuple: (success, pod_name, service_details)
     """
-    logger.info(f"Getting service details for pod {pod_name} in namespace {namespace}")
+    logger.info(f"Getting service details for namespace {namespace}" + (f", pod {pod_name}" if pod_name else ""))
     
     service_name = f"{namespace}-service"
+    
+    # If no pod name specified, try to find any pod in the namespace
+    if not pod_name:
+        success, stdout, stderr = execute_remote_command(
+            client, f"kubectl get pods -n {namespace} -l app={namespace} -o jsonpath='{{.items[0].metadata.name}}'"
+        )
+        
+        if success and stdout:
+            pod_name = stdout.strip()
+            logger.info(f"Found pod: {pod_name}")
+        else:
+            # Try to find any pod in the namespace as fallback
+            success, stdout, stderr = execute_remote_command(
+                client, f"kubectl get pods -n {namespace} -o jsonpath='{{.items[0].metadata.name}}'"
+            )
+            
+            if success and stdout:
+                pod_name = stdout.strip()
+                logger.info(f"Found pod using fallback: {pod_name}")
+            else:
+                logger.error(f"No pods found in namespace {namespace}")
+                return False, None, {}
+    
+    # Check if pod exists
+    success, stdout, stderr = execute_remote_command(
+        client, f"kubectl get pod {pod_name} -n {namespace} -o jsonpath='{{.status.phase}}' 2>/dev/null || echo 'NotFound'"
+    )
+    
+    if not success or 'NotFound' in stdout:
+        logger.warning(f"Pod {pod_name} not found in namespace {namespace}, trying to find any pod")
+        
+        # Try to find any pod in the namespace
+        success, stdout, stderr = execute_remote_command(
+            client, f"kubectl get pods -n {namespace} -l app={namespace} -o jsonpath='{{.items[0].metadata.name}}'"
+        )
+        
+        if success and stdout:
+            pod_name = stdout.strip()
+            logger.info(f"Found alternative pod: {pod_name}")
+        else:
+            logger.error(f"No pods found with app={namespace} label")
+            return False, None, {}
     
     # Check if pod is running
     success, stdout, stderr = execute_remote_command(
@@ -1735,7 +1993,7 @@ def get_pod_service_details(client, namespace, pod_name):
     )
     
     if not success or stdout.strip() != 'Running':
-        logger.error(f"Pod {pod_name} is not running, cannot get service details")
+        logger.error(f"Pod {pod_name} is not running (status: {stdout.strip() if success else 'unknown'}), cannot get service details")
         return False, pod_name, {}
     
     # Get HTTP nodePort
@@ -1775,14 +2033,45 @@ def get_pod_service_details(client, namespace, pod_name):
                     ttyd_port = port_match.group(1)
                     logger.info(f"Final attempt ttyd nodePort: {ttyd_port}")
     
+    # Get filebrowser nodePort
+    success, stdout, stderr = execute_remote_command(
+        client, f"kubectl get service {service_name} -n {namespace} -o jsonpath='{{.spec.ports[?(@.name==\"filebrowser\")].nodePort}}'"
+    )
+    
+    filebrowser_port = stdout.strip() if success and stdout else None
+    logger.info(f"Retrieved filebrowser nodePort: {filebrowser_port}")
+    
+    # If we couldn't get the filebrowser port, try again with a different approach
+    if not filebrowser_port:
+        logger.warning("Could not get filebrowser port with jsonpath, trying alternative method")
+        success, stdout, stderr = execute_remote_command(
+            client, f"kubectl get service {service_name} -n {namespace} -o yaml | grep -A 3 'name: filebrowser' | grep nodePort | awk '{{print $2}}'"
+        )
+        filebrowser_port = stdout.strip() if success and stdout else None
+        logger.info(f"Alternative method filebrowser nodePort: {filebrowser_port}")
+        
+        # If still no filebrowser port, try one more method
+        if not filebrowser_port:
+            success, stdout, stderr = execute_remote_command(
+                client, f"kubectl get service {service_name} -n {namespace} -o json | grep -A 10 '\"name\": \"filebrowser\"' | grep nodePort"
+            )
+            # Parse the JSON nodePort value
+            if success and stdout:
+                import re
+                port_match = re.search(r'"nodePort":\s*(\d+)', stdout)
+                if port_match:
+                    filebrowser_port = port_match.group(1)
+                    logger.info(f"Final attempt filebrowser nodePort: {filebrowser_port}")
+    
     # Get node IP
     success, stdout, stderr = execute_remote_command(
-        client, "kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type==\"InternalIP\")].address}'"
+        client,
+        "kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type==\"InternalIP\")].address}'"
     )
     
     node_ip = stdout.strip() if success and stdout else "localhost"
     
-    # Create service details with ttyd info
+    # Create service details with ttyd and filebrowser info
     service_details = {
         "nodePort": http_port,
         "ttydPort": ttyd_port,
@@ -1791,11 +2080,16 @@ def get_pod_service_details(client, namespace, pod_name):
         "ttydUrl": f"http://{node_ip}:{ttyd_port}" if ttyd_port else None
     }
     
-    logger.info(f"Service details for pod {pod_name}: {service_details}")
+    # Add filebrowser details if available
+    if filebrowser_port:
+        service_details["filebrowserPort"] = filebrowser_port
+        service_details["filebrowserUrl"] = f"http://{node_ip}:{filebrowser_port}"
+    
+    logger.info(f"Service details for namespace {namespace}: {service_details}")
     
     # Verify the ttydUrl is set
     if not service_details.get("ttydUrl"):
-        logger.warning(f"ttydUrl is not set in service_details for pod {pod_name}")
+        logger.warning(f"ttydUrl is not set in service_details for namespace {namespace}")
         
         # Dump detailed info about the service for debugging
         execute_remote_command(
@@ -1853,3 +2147,47 @@ def check_deployment_exists(client, namespace, deployment_name=None):
     except Exception as e:
         logger.error(f"Error checking deployment status: {str(e)}")
         return False
+
+
+def create_port_mappings(pod, service_details, service_name=None):
+    """
+    Create port mapping records for a pod.
+    
+    Args:
+        pod (KubernetesPod): The pod object
+        service_details (dict): Service details including port information
+        service_name (str, optional): Name of the service, defaults to "{namespace}-service" if not provided
+    """
+    # If service_name is not provided, generate a default one
+    if service_name is None and pod and pod.namespace:
+        service_name = f"{pod.namespace}-service"
+    
+    # Create port mapping for ttyd
+    if service_details.get('ttydPort'):
+        KubernetesPortMapping.objects.update_or_create(
+            pod=pod,
+            container_name='ttyd',
+            container_port=7681,
+            defaults={
+                'service_port': 7681,
+                'node_port': service_details.get('ttydPort'),
+                'protocol': 'TCP',
+                'service_name': service_name,
+                'description': 'Terminal access via ttyd'
+            }
+        )
+    
+    # Create port mapping for filebrowser
+    if service_details.get('filebrowserPort'):
+        KubernetesPortMapping.objects.update_or_create(
+            pod=pod,
+            container_name='filebrowser',
+            container_port=8080,
+            defaults={
+                'service_port': 8090,
+                'node_port': service_details.get('filebrowserPort'),
+                'protocol': 'TCP',
+                'service_name': service_name,
+                'description': 'File browser for workspace'
+            }
+        )

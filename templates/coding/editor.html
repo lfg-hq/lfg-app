@@ -183,6 +183,85 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
     margin: 15px 0;
     font-family: Consolas, monospace;
 }
+
+.loading-indicator {
+    padding: 15px;
+    display: flex;
+    align-items: center;
+    color: #ccc;
+}
+
+.loading-indicator .spinner {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    margin-right: 10px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: #0e639c;
+    animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.no-files-message {
+    padding: 15px;
+    color: #fcce0c;
+    text-align: center;
+}
+
+.no-files-message p {
+    margin-bottom: 15px;
+}
+
+.error-message {
+    padding: 15px;
+    color: #f14c4c;
+    background-color: rgba(241, 76, 76, 0.1);
+    border-radius: 4px;
+    margin: 10px;
+}
+
+/* Button styles */
+.btn {
+    display: inline-block;
+    padding: 6px 12px;
+    margin-bottom: 0;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.42857143;
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: middle;
+    cursor: pointer;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: white;
+}
+
+.btn-primary {
+    background-color: #2ea043;
+    border-color: #2a913c;
+}
+
+.btn-primary:hover {
+    background-color: #2a913c;
+}
+
+.btn-secondary {
+    background-color: #0e639c;
+    border-color: #0d5b8f;
+}
+
+.btn-secondary:hover {
+    background-color: #0d5b8f;
+}
+
+.mt-2 {
+    margin-top: 8px;
+}
 </style>
 </head>
 <body>
@@ -222,7 +301,9 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
                         <i class="mdi mdi-key" style="margin-right: 5px;"></i>
                         <span style="font-size: 12px;">Login with: <code style="background: #1e1e1e; padding: 2px 4px; border-radius: 3px;">user</code> / <code style="background: #1e1e1e; padding: 2px 4px; border-radius: 3px;">password</code></span>
                     </div>
+                    <div>
                     <button id="open-external-terminal" class="terminal-button prominent"><i class="mdi mdi-open-in-new"></i>Open Terminal in New Window</button>
+                    </div>
                 </div>
             </div>
             <iframe id="terminal-iframe" src="about:blank"></iframe>
@@ -241,28 +322,166 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
 
 <script>
 /*─────────────────────────────────────────────────────────────
-  Get project_id and conversation_id from URL parameters
+  Global file tree functions (accessible outside Monaco scope)
 ─────────────────────────────────────────────────────────────*/
-const urlParams = new URLSearchParams(window.location.search);
-const projectId = urlParams.get('project_id');
-const conversationId = urlParams.get('conversation_id');
+// Declare function in the global scope
+function loadFileTree() {
+    console.log("Loading file tree from Kubernetes pod...");
+    
+    // Track expanded folders and scroll position
+    const container = document.getElementById('file-tree-container');
+    const expanded = Array.from(container.querySelectorAll('.directory.expanded>.file-item'))
+                        .map(it => it.dataset.path);
+    const scrollPos = container.scrollTop;
+    
+    const loadingIndicator = document.createElement('div');
+    loadingIndicator.className = 'loading-indicator';
+    loadingIndicator.innerHTML = '<div class="spinner"></div><span>Loading files from Kubernetes pod...</span>';
+    
+    container.innerHTML = '';
+    container.appendChild(loadingIndicator);
+    
+    // Create request data
+    const requestData = { workspace_dir: "/workspace" };
+    if (window.projectId) requestData.project_id = window.projectId;
+    if (window.conversationId) requestData.conversation_id = window.conversationId;
+    if (window.podToken) requestData.token = window.podToken;
+
+    // Function to make the actual request
+    const makeRequest = () => {
+        fetch('/coding/k8s/get_file_tree/', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(requestData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                // If we get a token error, try refreshing the token and retry
+                if (data.error.includes('token') && !requestData.retried) {
+                    console.log('Token error, refreshing token and retrying...');
+                    return updatePodTokens().then(tokens => {
+                        if (tokens && tokens.podToken) {
+                            requestData.token = tokens.podToken;
+                            requestData.retried = true;
+                            return makeRequest();
+                        } else {
+                            container.innerHTML = `<div class="error-message">Error loading files: Invalid token</div>`;
+                        }
+                    });
+                }
+                container.innerHTML = `<div class="error-message">Error loading files: ${data.error}</div>`;
+                return;
+            }
+            
+            container.innerHTML = '';
+            
+        if (data.error) {
+                console.error("Error loading file tree:", data.error);
+                container.innerHTML = `<div class="error-message">Error loading files: ${data.error}</div>`;
+            return;
+        }
+            
+            if (!data.files || data.files.length === 0) {
+                console.log("No files found in Kubernetes pod workspace");
+                container.innerHTML = `
+                    <div class="no-files-message">
+                        <p>No files found in Kubernetes pod workspace.</p>
+                        <button id="create-first-file" class="btn btn-primary">Create First File</button>
+                        <button id="check-files-terminal" class="btn btn-secondary mt-2">Check via Terminal</button>
+                        <button id="refresh-file-tree" class="btn btn-secondary mt-2">Refresh</button>
+                    </div>
+                `;
+                document.getElementById('create-first-file').addEventListener('click', createFirstFile);
+                document.getElementById('check-files-terminal').addEventListener('click', checkForFilesInTerminal);
+                document.getElementById('refresh-file-tree').addEventListener('click', loadFileTree);
+                return;
+            }
+            
+            // Call global renderFileTree function
+            container.innerHTML = window.renderFileTree(data.files, true);
+            
+            // Restore expanded folders
+            expanded.forEach(path => {
+                const el = container.querySelector(`.directory>.file-item[data-path="${path}"]`);
+                if(el) el.parentElement.classList.add('expanded');
+            });
+            
+            container.querySelectorAll('.directory>.file-item').forEach(item => {
+                item.addEventListener('click', e => {
+                e.stopPropagation();
+                item.parentElement.classList.toggle('expanded');
+            });
+        });
+            
+            container.querySelectorAll('.file-item.file').forEach(item => {
+                const path = item.dataset.path;
+                item.onclick = () => window.openFile(path, item);
+            });
+            
+            // Restore active file highlighting
+            if(window.currentFile) {
+                const again = container.querySelector(`.file-item[data-path="${window.currentFile}"]`);
+                if(again) {
+                    again.classList.add('active'); 
+                    window.activeItem = again;
+                }
+            }
+            
+            // Restore scroll position
+            container.scrollTop = scrollPos;
+            
+            // If we have pod info in the response (from K8s), display it
+            if (data.pod_info) {
+                appendToTerminal(`Connected to Kubernetes pod: ${data.pod_info.pod_name} (${data.pod_info.status})`, 'out');
+            }
+        })
+        .catch(error => {
+            console.error("Error fetching file tree:", error);
+            container.innerHTML = `<div class="error-message">Error loading files: ${error.message}</div>`;
+        });
+    };
+
+    // If we don't have a token, get it first
+    if (!window.podToken) {
+        updatePodTokens().then(() => makeRequest());
+    } else {
+        makeRequest();
+    }
+}
+
+const refreshTree = loadFileTree;
 
 /*─────────────────────────────────────────────────────────────
-  Context‑menu helpers
+  Make URL params globally available
 ─────────────────────────────────────────────────────────────*/
-let contextMenuTarget=null;
-function showContextMenu(e,target){
-    e.preventDefault();
-    const m=document.getElementById('context-menu');
-    m.style.display='block';m.style.left=e.pageX+'px';m.style.top=e.pageY+'px';
-    contextMenuTarget=target;
+const urlParams = new URLSearchParams(window.location.search);
+window.projectId = urlParams.get('project_id');
+window.conversationId = urlParams.get('conversation_id');
+
+/*─────────────────────────────────────────────────────────────
+  Global renderFileTree function
+─────────────────────────────────────────────────────────────*/
+window.renderFileTree = function(items, isRoot=false, depth=1) {
+    let html='<ul class="file-tree"'+(isRoot?' id="root-tree"':'')+'>';
+    html+=items.map(item=>{
+        if(item.type==='directory'){
+            return`<li class="directory" style="--depth:${depth}">
+                      <div class="file-item" data-path="${item.path}">
+                          <i class="mdi mdi-chevron-right"></i>
+                          <i class="mdi mdi-folder${item.name.startsWith('.')?'-hidden':''}"></i>${item.name}
+                      </div>
+                      ${window.renderFileTree(item.children,false,depth+1)}
+                    </li>`;
+        }
+        return`<li style="--depth:${depth}">
+                  <div class="file-item file" data-path="${item.path}">
+                      <i class="mdi mdi-${getFileIcon(item.name)}"></i>${item.name}
+                  </div>
+                </li>`;
+    }).join('');
+    return html+'</ul>';
 }
-function hideContextMenu(){document.getElementById('context-menu').style.display='none';contextMenuTarget=null}
-document.addEventListener('contextmenu',e=>{
-    const item=e.target.closest('#file-explorer .file-item');
-    if(item)showContextMenu(e,item);
-});
-document.addEventListener('click',hideContextMenu);
 
 /*─────────────────────────────────────────────────────────────
   Icon map
@@ -280,309 +499,26 @@ const editor=monaco.editor.create(document.getElementById('monaco-editor'),{valu
 // expose for other handlers
 window.editor = editor;
 
-let currentFile='';let activeItem=null;
+// Set global variables for file state tracking
+window.currentFile = '';
+window.activeItem = null;
+window.currentFileSource = 'kubernetes';
 
-/*── render tree ──────────────────────────────────────────*/
-function renderFileTree(items,isRoot=false,depth=1){
-    let html='<ul class="file-tree"'+(isRoot?' id="root-tree"':'')+'>';
-    html+=items.map(item=>{
-        if(item.type==='directory'){
-            return`<li class="directory" style="--depth:${depth}">
-                      <div class="file-item" data-path="${item.path}">
-                          <i class="mdi mdi-chevron-right"></i>
-                          <i class="mdi mdi-folder${item.name.startsWith('.')?'-hidden':''}"></i>${item.name}
-                      </div>
-                      ${renderFileTree(item.children,false,depth+1)}
-                    </li>`;
-        }
-        return`<li style="--depth:${depth}">
-                  <div class="file-item file" data-path="${item.path}">
-                      <i class="mdi mdi-${getFileIcon(item.name)}"></i>${item.name}
-                  </div>
-                </li>`;
-    }).join('');
-    return html+'</ul>';
-}
-
-/*── load / refresh tree ─────────────────────────────────*/
-function loadFileTree(){
-    const container=document.getElementById('file-tree-container');
-    const expanded=Array.from(container.querySelectorAll('.directory.expanded>.file-item'))
-                        .map(it=>it.dataset.path);
-    const scrollPos=container.scrollTop;
-
-    // Create request data with optional project_id or conversation_id
-    const requestData = {};
-    if (projectId) requestData.project_id = projectId;
-    if (conversationId) requestData.conversation_id = conversationId;
-
-    return fetch('/coding/get_file_tree/', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json', 'Cache-Control': 'no-cache'},
-        body: JSON.stringify(requestData)
-    })
-    .then(r=>r.json())
-    .then(data=>{
-        if (data.error) {
-            appendToTerminal('Error loading file tree: ' + data.error, 'error');
-            return;
-        }
-            
-        const newHTML=renderFileTree(data.files,true);
-        if(container.innerHTML===newHTML)return;
-
-        container.innerHTML=newHTML;
-        expanded.forEach(path=>{
-            const el=container.querySelector(`.directory>.file-item[data-path="${path}"]`);
-            if(el)el.parentElement.classList.add('expanded');
-        });
-        container.querySelectorAll('.directory>.file-item').forEach(item=>{
-            item.addEventListener('click',e=>{
-                e.stopPropagation();
-                item.parentElement.classList.toggle('expanded');
-            });
-        });
-        container.querySelectorAll('.file-item.file').forEach(item=>{
-            const p=item.dataset.path;
-            item.onclick=()=>openFile(p,item);
-        });
-        if(currentFile){
-            const again=container.querySelector(`.file-item[data-path="${currentFile}"]`);
-            if(again){again.classList.add('active');activeItem=again;}
-        }
-        container.scrollTop=scrollPos;
-    })
-    .catch(err=>appendToTerminal('Error loading file tree: '+err,'error'));
-}
-const refreshTree=loadFileTree;
-
-/*── open file ───────────────────────────────────────────*/
-function openFile(path,element){
-    if(activeItem)activeItem.classList.remove('active');
-    element.classList.add('active');
-    activeItem=element;
-    currentFile=path;
-
-    // Create request data with path and optional project_id or conversation_id
-    const requestData = { path };
-    if (projectId) requestData.project_id = projectId;
-    if (conversationId) requestData.conversation_id = conversationId;
-
-    fetch('/coding/get_file_content/',{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(requestData)
-    })
-    .then(r=>r.json())
-    .then(data=>{
-        if (data.error) {
-            appendToTerminal('Error opening file: ' + data.error, 'error');
-            return;
-        }
-        const ext=path.split('.').pop();
-        const lang=monaco.languages.getLanguages().find(l=>l.extensions?.includes('.'+ext))?.id||'plaintext';
-        editor.setModel(monaco.editor.createModel(data.content,lang));
-    })
-    .catch(err => appendToTerminal('Error opening file: ' + err, 'error'));
-}
-
-/*── auto‑save ───────────────────────────────────────────*/
+// Set up auto-save in Monaco
 let saveTimeout;
 editor.onDidChangeModelContent(()=>{
-    if(!currentFile)return;
+    if(!window.currentFile)return;
     clearTimeout(saveTimeout);
-    saveTimeout=setTimeout(saveFile,1000);
-});
-function saveFile(){
-    if(!currentFile)return;
-
-    // Create request data with path, content, and optional project_id or conversation_id
-    const requestData = { 
-        path: currentFile,
-        content: editor.getValue()
-    };
-    if (projectId) requestData.project_id = projectId;
-    if (conversationId) requestData.conversation_id = conversationId;
-
-    fetch('/coding/save_file/',{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(requestData)
-    })
-    .then(r=>r.json())
-    .then(data=>{
-        if (data.error) {
-            appendToTerminal('Error saving file: ' + data.error, 'error');
-            return;
-        }
-        appendToTerminal('File saved: '+currentFile,'out');
-    })
-    .catch(err=>appendToTerminal('Error saving file: '+err,'error'));
-}
-editor.addCommand(monaco.KeyMod.CtrlCmd|monaco.KeyCode.KeyS,saveFile);
-
-/*── CRUD (create / rename / delete) ─────────────────────*/
-window.createNewFile=function(){
-    const name=prompt('Enter file name:');if(!name)return hideContextMenu();
-    const base=contextMenuTarget?.dataset.path??'';const path=base?`${base}/${name}`:name;
-    
-    // Create request data with path, content, and optional project_id or conversation_id
-    const requestData = { path, content: '' };
-    if (projectId) requestData.project_id = projectId;
-    if (conversationId) requestData.conversation_id = conversationId;
-
-    fetch('/coding/save_file/',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(requestData)
-    })
-    .then(r=>r.json())
-    .then(res=>{
-        res.error ? appendToTerminal('Error creating file: '+res.error,'error')
-                  : appendToTerminal('File created: '+path,'out');
-        refreshTree();
-    })
-    .catch(err=>appendToTerminal('Error creating file: '+err,'error'))
-    .finally(hideContextMenu);
-};
-window.createNewFolder=function(){
-    const name=prompt('Enter folder name:');if(!name)return hideContextMenu();
-    const base=contextMenuTarget?.dataset.path??'';const path=base?`${base}/${name}`:name;
-    
-    // Create request data with path and optional project_id or conversation_id
-    const requestData = { path };
-    if (projectId) requestData.project_id = projectId;
-    if (conversationId) requestData.conversation_id = conversationId;
-
-    fetch('/coding/create_folder/',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(requestData)
-    })
-    .then(r=>r.json())
-    .then(res=>{
-        res.error ? appendToTerminal('Error creating folder: '+res.error,'error')
-                  : appendToTerminal('Folder created: '+path,'out');
-        refreshTree();
-    })
-    .catch(err=>appendToTerminal('Error creating folder: '+err,'error'))
-    .finally(hideContextMenu);
-};
-window.renameItem=function(){
-    if(!contextMenuTarget)return hideContextMenu();
-    const old=contextMenuTarget.dataset.path;
-    const curName=contextMenuTarget.textContent.trim();
-    const newName=prompt('Enter new name:',curName);
-    if(!newName||newName===curName)return hideContextMenu();
-    const parent=old.substring(0,old.lastIndexOf('/'));
-    const newPath=parent?`${parent}/${newName}`:newName;
-    
-    // Create request data with paths and optional project_id or conversation_id
-    const requestData = { old_path: old, new_path: newPath };
-    if (projectId) requestData.project_id = projectId;
-    if (conversationId) requestData.conversation_id = conversationId;
-
-    fetch('/coding/rename_item/',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(requestData)
-    })
-    .then(r=>r.json())
-    .then(res=>{
-        res.error ? appendToTerminal('Error renaming: '+res.error,'error')
-                  : appendToTerminal(`Renamed ${old} ➜ ${newPath}`,'out');
-        refreshTree();
-    })
-    .catch(err=>appendToTerminal('Error renaming item: '+err,'error'))
-    .finally(hideContextMenu);
-};
-window.deleteItem=function(){
-    if(!contextMenuTarget)return hideContextMenu();
-    const path=contextMenuTarget.dataset.path;
-    const isDir=!!contextMenuTarget.querySelector('.mdi-folder,.mdi-folder-hidden');
-    const type=isDir?'folder':'file';
-    if(!confirm(`Delete this ${type}?\n${path}`))return hideContextMenu();
-    
-    // Create request data with path, is_directory, and optional project_id or conversation_id
-    const requestData = { path, is_directory: isDir };
-    if (projectId) requestData.project_id = projectId;
-    if (conversationId) requestData.conversation_id = conversationId;
-
-    fetch('/coding/delete_item/',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(requestData)
-    })
-    .then(r=>r.json())
-    .then(res=>{
-        res.error ? appendToTerminal('Error deleting: '+res.error,'error')
-                  : appendToTerminal(`Deleted ${type}: ${path}`,'out');
-        if(path===currentFile){
-            editor.setModel(monaco.editor.createModel('','plaintext'));
-            currentFile='';
-            if(activeItem)activeItem.classList.remove('active');
-        }
-        refreshTree();
-    })
-    .catch(err=>appendToTerminal('Error deleting item: '+err,'error'))
-    .finally(hideContextMenu);
-};
-
-/*─────────────────────────────────────────────────────────
-  Terminal
-─────────────────────────────────────────────────────────*/
-const tIn=document.getElementById('terminal-input');
-const tOut=document.getElementById('terminal-output');
-
-tIn.addEventListener('keypress',e=>{
-    if(e.key!=='Enter')return;
-    const cmd=e.target.value.trim();
-    e.target.value='';
-    if(!cmd){
-        /* If user just hits Enter, echo a blank prompt line */
-        appendToTerminal('$','cmd');
-        return;
-    }
-
-    /* built‑ins -----------------------------------------------------*/
-    if(cmd==='clear'||cmd==='cls'){tOut.innerHTML='';return;}
-
-    appendToTerminal('$ '+cmd,'cmd');
-    
-    // Create request data with command and optional project_id or conversation_id
-    const requestData = { command: cmd };
-    if (projectId) requestData.project_id = projectId;
-    if (conversationId) requestData.conversation_id = conversationId;
-
-    fetch('/coding/execute_command/',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(requestData)
-    })
-    .then(r=>r.json())
-    .then(res=>{
-        if (res.error) {
-            appendToTerminal(res.error, 'error');
-            return;
-        }
-        if(res.stdout)appendToTerminal(res.stdout,'out');
-        if(res.stderr)appendToTerminal(res.stderr,'error');
-    })
-    .catch(err=>appendToTerminal('Error executing command: '+err,'error'));
+    saveTimeout=setTimeout(window.saveFile,1000);
 });
 
-function appendToTerminal(text,type='out'){
-    const div=document.createElement('div');
-    div.className='terminal-output '+type;
-    div.textContent=text;
-    tOut.appendChild(div);
-    /* Auto‑scroll terminal container */
-    const termEl=document.getElementById('terminal');
-    termEl.scrollTop=termEl.scrollHeight;
-}
+// Add keyboard shortcuts
+editor.addCommand(monaco.KeyMod.CtrlCmd|monaco.KeyCode.KeyS, window.saveFile);
 
-/*─────────────────────────────────────────────────────────
+/*─────────────────────────────────────────────────────────────
   Initial load
-─────────────────────────────────────────────────────────*/
-loadFileTree();
+─────────────────────────────────────────────────────────────*/
+console.log("Monaco initialized");
 });/* end require */
 
 /*─────────────────────────────────────────────────────────────
@@ -817,6 +753,53 @@ function updateTerminalStatus(status, color) {
     }
 }
 
+// Global variables to store different tokens
+window.podToken = null;  // For file operations
+window.ttydToken = null; // For terminal operations
+
+// Function to get pod info and store tokens separately
+function updatePodTokens() {
+    const requestData = {};
+    if (window.projectId) requestData.project_id = window.projectId;
+    if (window.conversationId) requestData.conversation_id = window.conversationId;
+    
+    return fetch('/coding/k8s/get_pod_info/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify(requestData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            console.error('Error fetching pod tokens:', data.error);
+            return null;
+        }
+        
+        // Store tokens separately
+        if (data.service_details) {
+            window.podToken = data.service_details.file_token || data.service_details.token;
+            window.ttydToken = data.service_details.ttyd_token || data.service_details.token;
+            console.log('Updated tokens:', {
+                podToken: window.podToken?.substring(0, 8) + '...',
+                ttydToken: window.ttydToken?.substring(0, 8) + '...'
+            });
+        }
+        
+        return {
+            podToken: window.podToken,
+            ttydToken: window.ttydToken
+        };
+    })
+    .catch(error => {
+        console.error('Error fetching pod tokens:', error);
+        return null;
+    });
+}
+
+// Modify fetchPodInfo to use ttydToken
 function fetchPodInfo() {
     // Create request data with project_id or conversation_id
     const requestData = {};
@@ -839,8 +822,6 @@ function fetchPodInfo() {
         } else if (conversationId) {
             requestData.conversation_id = conversationId;
         }
-    } else {
-        console.error('Terminal container element not found in DOM');
     }
     
     // If neither project_id nor conversation_id, try to get from URL parameters as fallback
@@ -848,11 +829,6 @@ function fetchPodInfo() {
         const urlParams = new URLSearchParams(window.location.search);
         const urlProjectId = urlParams.get('project_id');
         const urlConversationId = urlParams.get('conversation_id');
-        
-        console.log('URL parameters:', {
-            'project_id': urlProjectId,
-            'conversation_id': urlConversationId
-        });
         
         if (urlProjectId) {
             requestData.project_id = urlProjectId;
@@ -872,85 +848,83 @@ function fetchPodInfo() {
         },
         body: JSON.stringify(requestData)
     })
-    .then(response => response.json())
+    .then(response => {
+        console.log('Pod info response status:', response.status);
+        return response.json();
+    })
     .then(data => {
         console.log('Pod info response:', data);
         
         if (data.error) {
             updateTerminalStatus('Error: ' + data.error, '#f14c4c');
             console.error('Error fetching pod info:', data.error);
-            
-            // Display the error in the iframe
-            try {
                 showTerminalError('pod info endpoint', data);
-            } catch (e) {
-                console.error('Failed to show error in iframe:', e);
-            }
-            
-            // Try again after delay
             setTimeout(fetchPodInfo, 5000);
             return;
         }
         
+        // Store tokens first
+        if (data.service_details) {
+            window.podToken = data.service_details.file_token || data.service_details.token;
+            window.ttydToken = data.service_details.ttyd_token || data.service_details.token;
+        }
+        
         // Get ttydUrl from top level (preferred) or from service_details
-        const ttydUrl = data.ttydUrl || (data.service_details && data.service_details.ttydUrl);
+        let ttydUrl = data.ttydUrl || (data.service_details && data.service_details.ttydUrl);
         
         // If we don't have a ttyd URL but have enough information, try to construct it
-        let constructedTtydUrl = null;
         if (!ttydUrl && data.service_details) {
             const nodeIP = data.service_details.nodeIP;
             const ttydPort = data.service_details.ttydPort;
             
             if (nodeIP && ttydPort) {
-                constructedTtydUrl = `http://${nodeIP}:${ttydPort}`;
-                console.log('Constructed ttydUrl from pieces:', constructedTtydUrl);
+                ttydUrl = `http://${nodeIP}:${ttydPort}`;
+                console.log('Constructed ttydUrl from pieces:', ttydUrl);
             }
         }
         
-        // Check if we have a ttyd URL (either provided or constructed)
-        if (ttydUrl || constructedTtydUrl) {
-            const finalTtydUrl = ttydUrl || constructedTtydUrl;
-            console.log('Loading ttyd URL:', finalTtydUrl);
+        if (ttydUrl) {
+            console.log('Loading ttyd URL:', ttydUrl);
             updateTerminalStatus('Connected', '#4caf50');
             
             // Save the URL for potential reuse
-            lastTtydUrl = finalTtydUrl;
+            lastTtydUrl = ttydUrl;
             
-            // Add query parameters for automatic login if possible
-            let ttydUrlWithCredentials = finalTtydUrl;
-            
-            // Try to parse the URL to see if we can add credentials directly
+            // Add authentication parameters
             try {
-                const urlObj = new URL(finalTtydUrl);
-                // Add query parameters for username and password (will be used by our auto-login script)
+                const urlObj = new URL(ttydUrl);
+                
+                // Add ttyd token if available
+                if (window.ttydToken) {
+                    urlObj.searchParams.set('token', window.ttydToken);
+                }
+                
+                // Add credentials
                 urlObj.searchParams.set('_username', 'user');
                 urlObj.searchParams.set('_password', 'password');
-                ttydUrlWithCredentials = urlObj.toString();
+                
+                ttydUrl = urlObj.toString();
+                console.log('Final ttyd URL with auth:', ttydUrl);
             } catch (e) {
-                console.warn('Could not parse ttyd URL to add credentials:', e);
+                console.warn('Could not parse ttyd URL:', e);
             }
             
-            console.log('Using ttyd URL with credentials parameters:', ttydUrlWithCredentials);
-            
-            // Set up focus helpers after iframe loads
+            // Set up iframe load handler
             terminalIframe.onload = function() {
                 console.log('Terminal iframe loaded successfully');
                 terminalConnected = true;
                 
-                // Try to focus the iframe after loading - multiple attempts with delay
+                // Try to focus and auto-login
                 let focusAttempts = 0;
                 const attemptFocus = function() {
-                    if (focusAttempts > 5) return; // Give up after several attempts
+                    if (focusAttempts > 5) return;
                     
                     try {
                         terminalIframe.focus();
                         console.log(`Focus attempt ${focusAttempts+1}: Focused terminal iframe`);
                         
-                        // Try to click inside the iframe to activate it
                         const iframeDoc = terminalIframe.contentDocument || terminalIframe.contentWindow.document;
                         if (iframeDoc && iframeDoc.body) {
-                            console.log('Attempting to trigger focus in iframe body');
-                            // Try to dispatch click event inside iframe
                             try {
                                 const clickEvent = new MouseEvent('click', {
                                     bubbles: true,
@@ -959,10 +933,10 @@ function fetchPodInfo() {
                                 });
                                 iframeDoc.body.dispatchEvent(clickEvent);
                                 
-                                // Try to auto-fill login form 
+                                // Try to auto-fill login form with delay
                                 setTimeout(() => {
                                     try {
-                                        console.log('Attempting to auto-fill login form in iframe');
+                                        console.log('Attempting to auto-fill login form');
                                         const form = iframeDoc.querySelector('form');
                                         const usernameInput = iframeDoc.querySelector('input[type="text"]');
                                         const passwordInput = iframeDoc.querySelector('input[type="password"]');
@@ -973,11 +947,9 @@ function fetchPodInfo() {
                                             usernameInput.value = 'user';
                                             passwordInput.value = 'password';
                                             submitButton.click();
-                                        } else {
-                                            console.log('Login form not found in iframe');
                                         }
                                     } catch (e) {
-                                        console.warn('Error auto-filling credentials in iframe:', e);
+                                        console.warn('Error auto-filling credentials:', e);
                                     }
                                 }, 1000);
                             } catch (e) {
@@ -985,83 +957,29 @@ function fetchPodInfo() {
                             }
                         }
                     } catch (e) {
-                        console.warn(`Focus attempt ${focusAttempts+1} failed: ${e}`);
+                        console.warn(`Focus attempt ${focusAttempts+1} failed:`, e);
                     }
                     
                     focusAttempts++;
-                    setTimeout(attemptFocus, 1000); // Try again in 1 second
+                    if (focusAttempts < 5) {
+                        setTimeout(attemptFocus, 1000);
+                    }
                 };
                 
-                // Start focus attempts
                 attemptFocus();
             };
             
-            terminalIframe.onerror = function(error) {
-                console.error('Failed to load terminal iframe:', error);
-                updateTerminalStatus('Failed to connect', '#f14c4c');
-                showTerminalError(finalTtydUrl, { 
-                    error_details: 'The ttyd terminal service failed to load in the iframe.',
-                    debug_info: {
-                        pod_name: data.pod_name || 'unknown',
-                        service_name: data.service_name || 'unknown',
-                        constructed: !!constructedTtydUrl,
-                        ttyd_port: data.service_details?.ttydPort,
-                        node_ip: data.service_details?.nodeIP
-                    }
-                });
-            };
-            
-            // Set iframe source to the ttyd URL with credentials
-            terminalIframe.src = ttydUrlWithCredentials;
+            // Set iframe source
+            terminalIframe.src = ttydUrl;
             
             // Update external button URL
             if (openExternalButton) {
                 openExternalButton.onclick = function() {
-                    // Store terminal credentials in localStorage for auto-login
-                    try {
-                        localStorage.setItem('terminal_username', 'user');
-                        localStorage.setItem('terminal_password', 'password');
-                    } catch (e) {
-                        console.warn('Could not store terminal credentials in localStorage:', e);
-                    }
-                    
-                    // Open in a named window with reasonable dimensions and ensure it gets focus
-                    const terminalWindow = window.open(ttydUrlWithCredentials, 'terminal_window', 'width=800,height=600,menubar=no,toolbar=no,location=no,resizable=yes,scrollbars=yes,status=no');
+                    const terminalWindow = window.open(ttydUrl, 'terminal_window', 'width=800,height=600');
                     if (terminalWindow) {
                         terminalWindow.focus();
-                        console.log('Opened terminal in new window with focus');
-                        
-                        // Inject auto-login script into the new window
-                        try {
-                            terminalWindow.onload = function() {
-                                console.log('Terminal window loaded, attempting auto-login');
-                                const loginScript = 
-                                    "setTimeout(function() {" +
-                                    "  // Try to find username and password fields" +
-                                    "  const usernameField = document.querySelector('input[type=\"text\"]');" +
-                                    "  const passwordField = document.querySelector('input[type=\"password\"]');" +
-                                    "  const loginButton = document.querySelector('button[type=\"button\"]');" +
-                                    "  " +
-                                    "  if (usernameField && passwordField && loginButton) {" +
-                                    "    console.log('Found login form, attempting to fill credentials');" +
-                                    "    usernameField.value = 'user';" +
-                                    "    passwordField.value = 'password';" +
-                                    "    loginButton.click();" +
-                                    "  } else {" +
-                                    "    console.log('Login form elements not found');" +
-                                    "  }" +
-                                    "}, 1000);";
-                                
-                                // Add the script to the new window
-                                const scriptEl = terminalWindow.document.createElement('script');
-                                scriptEl.textContent = loginScript;
-                                terminalWindow.document.body.appendChild(scriptEl);
-                            };
-                        } catch (e) {
-                            console.warn('Could not inject auto-login script:', e);
-                        }
                     }
-                    return false; // Prevent default action
+                    return false;
                 };
             }
             
@@ -1070,56 +988,36 @@ function fetchPodInfo() {
                 clearTimeout(terminalConnectionTimeout);
             }
             
-            // Set a timeout to detect if the terminal doesn't respond
+            // Set connection timeout
             terminalConnectionTimeout = setTimeout(function() {
-                // Only check if we haven't confirmed success yet
                 if (!terminalConnected) {
-                    console.warn('Terminal connection may have failed - no confirmation within timeout period');
-                    // We don't update status here since the iframe load/error handlers will handle that
+                    console.warn('Terminal connection timeout - retrying');
+                    fetchPodInfo();
                 }
             }, 10000);
         } else {
-            // We don't have a ttyd URL - handle error
-            console.error('No ttydUrl returned from server', data);
-            
-            // Check if there's a warning about recreation
-            if (data.warning) {
-                updateTerminalStatus(data.warning, '#fcce0c');
-            } else {
+            console.error('No ttydUrl available:', data);
                 updateTerminalStatus('Waiting for terminal service...', '#fcce0c');
-            }
-            
-            // Show detailed error in the iframe with specific information
-            const errorDetails = data.warning || 'The server did not provide a ttyd terminal URL.';
-            const debugInfo = data.debug_info || {
-                pod_name: data.pod_name || 'unknown',
-                service_name: data.service_name || 'unknown',
-                message: 'The ttyd service may still be starting or encountered an issue.'
-            };
-            
             showTerminalError('ttyd service', {
-                error_details: errorDetails,
-                debug_info: debugInfo
+                error_details: 'No terminal URL available. Service may still be starting.',
+                debug_info: {
+                    pod_name: data.pod_name || 'unknown',
+                    service_details: data.service_details || {}
+                }
             });
-            
-            // Try again after delay
-            setTimeout(fetchPodInfo, 5000);
+            // setTimeout(fetchPodInfo, 5000);
         }
     })
     .catch(error => {
         console.error('Error fetching pod info:', error);
         updateTerminalStatus('Connection error', '#f14c4c');
-        
-        // Show error in iframe
         showTerminalError('API endpoint', {
             error_details: error.toString(),
             debug_info: {
-                message: 'Failed to connect to the pod info endpoint. Server may be unavailable.'
+                message: 'Failed to connect to the pod info endpoint.'
             }
         });
-        
-        // Try again after delay
-        setTimeout(fetchPodInfo, 5000);
+        // setTimeout(fetchPodInfo, 5000);
     });
 }
 
@@ -1293,6 +1191,450 @@ function showTerminalHelp() {
         });
     }
 }
+
+// Function to create a first file when the workspace is empty
+window.createFirstFile = function() {
+    const fileName = prompt('Enter file name:', 'hello.py');
+    if (!fileName) return;
+    
+    // Sample content based on file extension
+    let content = '';
+    const ext = fileName.split('.').pop().toLowerCase();
+    
+    if (ext === 'py') {
+        content = '# My first Python file\n\ndef hello():\n    print("Hello, world!")\n\nif __name__ == "__main__":\n    hello()';
+    } else if (ext === 'js') {
+        content = '// My first JavaScript file\n\nfunction hello() {\n    console.log("Hello, world!");\n}\n\nhello();';
+    } else if (ext === 'html') {
+        content = '<!DOCTYPE html>\n<html>\n<head>\n    <title>My Page</title>\n</head>\n<body>\n    <h1>Hello, world!</h1>\n</body>\n</html>';
+    } else if (ext === 'css') {
+        content = '/* My first CSS file */\n\nbody {\n    font-family: Arial, sans-serif;\n    margin: 0;\n    padding: 20px;\n}';
+    } else {
+        content = '# Hello, world!';
+    }
+    
+    // Create request data
+    const requestData = { 
+        path: fileName,
+        content: content
+    };
+    if (window.projectId) requestData.project_id = window.projectId;
+    if (window.conversationId) requestData.conversation_id = window.conversationId;
+    
+    console.log("Creating first file:", requestData);
+    
+    fetch('/coding/k8s/save_file/', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(requestData)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) {
+            appendToTerminal('Error creating file: ' + data.error, 'error');
+            console.error("Error creating first file:", data.error);
+            return;
+        }
+        appendToTerminal('File created: ' + fileName, 'out');
+        loadFileTree();
+        
+        // Also run the file if it's a Python file to demonstrate how it works
+        if (ext === 'py') {
+            setTimeout(() => {
+                const runCmd = { 
+                    command: `python ${fileName}`,
+                    project_id: window.projectId,
+                    conversation_id: window.conversationId
+                };
+                
+                fetch('/coding/k8s/execute_command/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(runCmd)
+                })
+                .then(r => r.json())
+                .then(res => {
+                    if (res.stdout) appendToTerminal(res.stdout, 'out');
+                    if (res.stderr) appendToTerminal(res.stderr, 'error');
+                })
+                .catch(err => console.error("Error running first file:", err));
+            }, 1000);
+        }
+    })
+    .catch(err => {
+        appendToTerminal('Error creating file: ' + err, 'error');
+        console.error("Error creating first file:", err);
+    });
+};
+
+/*──────────────────────────────────────────────────────────────
+  Function to check for files via terminal command and sync the file explorer
+──────────────────────────────────────────────────────────────*/
+function checkForFilesInTerminal() {
+    console.log("Checking for files in terminal...");
+    appendToTerminal("Checking for workspace files...", 'out');
+    
+    const requestData = { 
+        command: "ls -la /workspace"
+    };
+    if (window.projectId) requestData.project_id = window.projectId;
+    if (window.conversationId) requestData.conversation_id = window.conversationId;
+    
+    fetch('/coding/k8s/execute_command/', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(requestData)
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (res.error) {
+            appendToTerminal('Error checking files: ' + res.error, 'error');
+            return;
+        }
+        
+        if (res.stdout) {
+            appendToTerminal(res.stdout, 'out');
+            
+            // Parse file list from ls output
+            const lines = res.stdout.split('\n').filter(line => line.trim() !== '');
+            
+            // Skip the first line (total) and hidden files/directories
+            const files = lines
+                .slice(1) // Skip "total XX" line if present
+                .filter(line => !line.includes(' . ') && !line.includes(' .. ') && !line.match(/^\s*d.*\s\./)) // Skip . and .. and hidden dirs
+                .map(line => {
+                    const parts = line.trim().split(/\s+/);
+                    const fileName = parts.slice(8).join(' '); // Filename is after the 8th space-separated part
+                    const isDir = line.startsWith('d');
+                    return {
+                        name: fileName,
+                        type: isDir ? 'directory' : 'file',
+                        path: fileName,
+                        children: isDir ? [] : undefined
+                    };
+                })
+                .filter(file => file.name && !file.name.startsWith('.'));
+                
+            console.log("Files found via terminal:", files);
+            
+            if (files.length > 0) {
+                // If we found files but the explorer is empty, manually add them to the file explorer
+                const container = document.getElementById('file-tree-container');
+                if (!container.querySelector('.file-item')) {
+                    container.innerHTML = window.renderFileTree(files, true);
+                    
+                    // Add event listeners for the new items
+                    container.querySelectorAll('.directory>.file-item').forEach(item => {
+                        item.addEventListener('click', e => {
+                            e.stopPropagation();
+                            item.parentElement.classList.toggle('expanded');
+                        });
+                    });
+                    
+                    container.querySelectorAll('.file-item.file').forEach(item => {
+                        const p = item.dataset.path;
+                        item.onclick = () => window.openFile(p, item);
+                    });
+                    
+                    appendToTerminal('Updated file explorer from terminal output', 'out');
+                }
+            } else {
+                appendToTerminal('No files found in workspace. Use the context menu (right-click) to create files.', 'out');
+            }
+        }
+        
+        if (res.stderr) {
+            appendToTerminal(res.stderr, 'error');
+        }
+    })
+    .catch(err => {
+        appendToTerminal('Error checking files: ' + err, 'error');
+        console.error("Error checking files:", err);
+    });
+}
+
+// Function to check for files after initialization
+function checkForFilesAfterInitialization() {
+    setTimeout(() => {
+        const container = document.getElementById('file-tree-container');
+        if (!container.querySelector('.file-item') && !container.querySelector('.loading-indicator')) {
+            console.log("No files found in explorer after initialization, checking terminal...");
+            checkForFilesInTerminal();
+        }
+    }, 5000); // 5 second delay to ensure initial file tree load has completed
+}
+
+// Initialize everything when window loads
+window.addEventListener('load', function() {
+    console.log("Window loaded - initializing editor and file explorer");
+    
+    // Get tokens first, then load the file tree
+    updatePodTokens().then(() => {
+        loadFileTree();
+        
+        // Continue with other initializations if they exist
+        if (typeof initializePodConnection === 'function') initializePodConnection();
+        if (typeof initializeTerminal === 'function') initializeTerminal();
+        if (typeof initializeButtons === 'function') initializeButtons();
+        if (typeof initializeContext === 'function') initializeContext();
+        
+        // Set up automatic file check if explorer is empty
+        checkForFilesAfterInitialization();
+    });
+});
+
+/*─────────────────────────────────────────────────────────────
+  Context‑menu helpers
+─────────────────────────────────────────────────────────────*/
+let contextMenuTarget=null;
+function showContextMenu(e,target){
+    e.preventDefault();
+    const m=document.getElementById('context-menu');
+    m.style.display='block';m.style.left=e.pageX+'px';m.style.top=e.pageY+'px';
+    contextMenuTarget=target;
+}
+function hideContextMenu(){document.getElementById('context-menu').style.display='none';contextMenuTarget=null}
+document.addEventListener('contextmenu',e=>{
+    const item=e.target.closest('#file-explorer .file-item');
+    if(item)showContextMenu(e,item);
+});
+document.addEventListener('click',hideContextMenu);
+
+/*── open file - globally accessible ─────────────────────────*/
+window.openFile = function(path, element) {
+    if(window.activeItem)window.activeItem.classList.remove('active');
+    element.classList.add('active');
+    window.activeItem=element;
+    window.currentFile=path;
+
+    // Create request data
+    const requestData = { path };
+    if (window.projectId) requestData.project_id = window.projectId;
+    if (window.conversationId) requestData.conversation_id = window.conversationId;
+    if (window.podToken) requestData.token = window.podToken;
+
+    // Function to make the actual request
+    const makeRequest = () => {
+        fetch('/coding/k8s/get_file_content/', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(requestData)
+        })
+        .then(r=>r.json())
+        .then(data=>{
+            if (data.error) {
+                // If we get a token error, try refreshing the token and retry
+                if (data.error.includes('token') && !requestData.retried) {
+                    console.log('Token error, refreshing tokens and retrying...');
+                    return updatePodTokens().then(tokens => {
+                        if (tokens && tokens.podToken) {
+                            requestData.token = tokens.podToken;
+                            requestData.retried = true;
+                            return makeRequest();
+                        } else {
+                            appendToTerminal('Error opening file: Invalid token', 'error');
+                        }
+                    });
+                }
+                appendToTerminal('Error opening file: ' + data.error, 'error');
+                return;
+            }
+            const ext=path.split('.').pop();
+            const lang=monaco.languages.getLanguages().find(l=>l.extensions?.includes('.'+ext))?.id||'plaintext';
+            window.editor.setModel(monaco.editor.createModel(data.content,lang));
+        })
+        .catch(err => appendToTerminal('Error opening file: ' + err, 'error'));
+    };
+
+    // If we don't have a token, get it first
+    if (!window.podToken) {
+        updatePodTokens().then(() => makeRequest());
+    } else {
+        makeRequest();
+    }
+}
+
+/*── auto‑save - defined inside Monaco init but using globals ───*/
+window.saveFile = function() {
+    if(!window.currentFile)return;
+
+    // Create request data
+    const requestData = { 
+        path: window.currentFile,
+        content: window.editor.getValue()
+    };
+    if (window.projectId) requestData.project_id = window.projectId;
+    if (window.conversationId) requestData.conversation_id = window.conversationId;
+    if (window.podToken) requestData.token = window.podToken;
+
+    // Function to make the actual request
+    const makeRequest = () => {
+        fetch('/coding/k8s/save_file/', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(requestData)
+        })
+        .then(r=>r.json())
+        .then(data=>{
+            if (data.error) {
+                // If we get a token error, try refreshing the token and retry
+                if (data.error.includes('token') && !requestData.retried) {
+                    console.log('Token error, refreshing token and retrying...');
+                    return updatePodTokens().then(tokens => {
+                        if (tokens && tokens.podToken) {
+                            requestData.token = tokens.podToken;
+                            requestData.retried = true;
+                            return makeRequest();
+                        } else {
+                            appendToTerminal('Error saving file: Invalid token', 'error');
+                        }
+                    });
+                }
+                appendToTerminal('Error saving file: ' + data.error, 'error');
+                return;
+            }
+            appendToTerminal('File saved: '+window.currentFile,'out');
+        })
+        .catch(err=>appendToTerminal('Error saving file: '+err,'error'));
+    };
+
+    // If we don't have a token, get it first
+    if (!window.podToken) {
+        updatePodTokens().then(() => makeRequest());
+    } else {
+        makeRequest();
+    }
+}
+
+/*─────────────────────────────────────────────────────────
+  Terminal
+─────────────────────────────────────────────────────────*/
+function appendToTerminal(text, type='out') {
+    console.log(`Terminal ${type}: ${text}`);
+    
+    // If terminal output exists, append to it
+    const tOut = document.getElementById('terminal-output');
+    if (tOut) {
+        const div = document.createElement('div');
+        div.className = 'terminal-output ' + type;
+        div.textContent = text;
+        tOut.appendChild(div);
+        
+        // Auto‑scroll terminal container
+        const termEl = document.getElementById('terminal');
+        if (termEl) termEl.scrollTop = termEl.scrollHeight;
+    } else {
+        // If we're using iframe terminal, show message in console
+        console.log("Terminal output element not found - using ttyd instead");
+    }
+}
+
+/*── CRUD (create / rename / delete) ─────────────────────*/
+window.createNewFile=function(){
+    const name=prompt('Enter file name:');if(!name)return hideContextMenu();
+    const base=contextMenuTarget?.dataset.path??'';const path=base?`${base}/${name}`:name;
+    
+    // Create request data with path, content, and optional project_id or conversation_id
+    const requestData = { path, content: '' };
+    if (window.projectId) requestData.project_id = window.projectId;
+    if (window.conversationId) requestData.conversation_id = window.conversationId;
+
+    fetch('/coding/k8s/save_file/', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(requestData)
+    })
+    .then(r=>r.json())
+    .then(res=>{
+        res.error ? appendToTerminal('Error creating file: '+res.error,'error')
+                  : appendToTerminal('File created: '+path,'out');
+        loadFileTree();
+    })
+    .catch(err=>appendToTerminal('Error creating file: '+err,'error'))
+    .finally(hideContextMenu);
+};
+window.createNewFolder=function(){
+    const name=prompt('Enter folder name:');if(!name)return hideContextMenu();
+    const base=contextMenuTarget?.dataset.path??'';const path=base?`${base}/${name}`:name;
+    
+    // Create request data with path and optional project_id or conversation_id
+    const requestData = { path };
+    if (window.projectId) requestData.project_id = window.projectId;
+    if (window.conversationId) requestData.conversation_id = window.conversationId;
+
+    fetch('/coding/k8s/create_folder/', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(requestData)
+    })
+    .then(r=>r.json())
+    .then(res=>{
+        res.error ? appendToTerminal('Error creating folder: '+res.error,'error')
+                  : appendToTerminal('Folder created: '+path,'out');
+        loadFileTree();
+    })
+    .catch(err=>appendToTerminal('Error creating folder: '+err,'error'))
+    .finally(hideContextMenu);
+};
+window.renameItem=function(){
+    if(!contextMenuTarget)return hideContextMenu();
+    const old=contextMenuTarget.dataset.path;
+    const curName=contextMenuTarget.textContent.trim();
+    const newName=prompt('Enter new name:',curName);
+    if(!newName||newName===curName)return hideContextMenu();
+    const parent=old.substring(0,old.lastIndexOf('/'));
+    const newPath=parent?`${parent}/${newName}`:newName;
+    
+    // Create request data with paths and optional project_id or conversation_id
+    const requestData = { old_path: old, new_path: newPath };
+    if (window.projectId) requestData.project_id = window.projectId;
+    if (window.conversationId) requestData.conversation_id = window.conversationId;
+
+    fetch('/coding/k8s/rename_item/', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(requestData)
+    })
+    .then(r=>r.json())
+    .then(res=>{
+        res.error ? appendToTerminal('Error renaming: '+res.error,'error')
+                  : appendToTerminal(`Renamed ${old} ➜ ${newPath}`,'out');
+        loadFileTree();
+    })
+    .catch(err=>appendToTerminal('Error renaming item: '+err,'error'))
+    .finally(hideContextMenu);
+};
+window.deleteItem=function(){
+    if(!contextMenuTarget)return hideContextMenu();
+    const path=contextMenuTarget.dataset.path;
+    const isDir=!!contextMenuTarget.querySelector('.mdi-folder,.mdi-folder-hidden');
+    const type=isDir?'folder':'file';
+    if(!confirm(`Delete this ${type}?\n${path}`))return hideContextMenu();
+    
+    // Create request data with path, is_directory, and optional project_id or conversation_id
+    const requestData = { path, is_directory: isDir };
+    if (window.projectId) requestData.project_id = window.projectId;
+    if (window.conversationId) requestData.conversation_id = window.conversationId;
+
+    fetch('/coding/k8s/delete_item/', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(requestData)
+    })
+    .then(r=>r.json())
+    .then(res=>{
+        res.error ? appendToTerminal('Error deleting: '+res.error,'error')
+                  : appendToTerminal(`Deleted ${type}: ${path}`,'out');
+        if(path===window.currentFile){
+            window.editor.setModel(monaco.editor.createModel('','plaintext'));
+            window.currentFile='';
+            if(window.activeItem)window.activeItem.classList.remove('active');
+        }
+        loadFileTree();
+    })
+    .catch(err=>appendToTerminal('Error deleting item: '+err,'error'))
+    .finally(hideContextMenu);
+};
 </script>
 {% endif %}
 </body>

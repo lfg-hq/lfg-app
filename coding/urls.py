@@ -19,6 +19,8 @@ urlpatterns = [
     path('k8s/create_folder/', views.k8s_create_folder, name='k8s_create_folder'),
     path('k8s/delete_item/', views.k8s_delete_item, name='k8s_delete_item'),
     path('k8s/rename_item/', views.k8s_rename_item, name='k8s_rename_item'),
+    
     path('k8s/get_pod_info/', views.get_k8s_pod_info, name='get_k8s_pod_info'),
     path('k8s/execute_command/', views.k8s_execute_command, name='k8s_execute_command'),
+    path('k8s/get_filebrowser_url/', views.get_filebrowser_url, name='get_filebrowser_url'),
 ] 

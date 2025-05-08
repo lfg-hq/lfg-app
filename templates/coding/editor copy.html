@@ -4,11 +4,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Dev Environment Editor</title>
+<title>Monaco Editor</title>
 
 <!-- Monaco & Material Icons -->
-<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.40.0/min/vs/loader.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.34.0/min/vs/loader.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@6.5.95/css/materialdesignicons.min.css">
 
 <style>
 /* ── transparent scrollbar everywhere ───────────────────────────── */
@@ -27,16 +27,10 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
 
 /* Explorer pane */
 #file-explorer{min-width:100px;max-width:600px;width:250px;background:#252526;color:#fff;overflow-y:auto;font-size:13px;flex-shrink:0}
-.explorer-title{padding:10px 20px;font-size:11px;text-transform:uppercase;font-weight:700;letter-spacing:1px;color:#bbb;background:#252526;display:flex;justify-content:space-between;align-items:center}
-.explorer-actions{display:flex;gap:5px}
-.explorer-action{cursor:pointer;opacity:0.7;transition:opacity 0.2s}
-.explorer-action:hover{opacity:1}
+.explorer-title{padding:10px 20px;font-size:11px;text-transform:uppercase;font-weight:700;letter-spacing:1px;color:#bbb;background:#252526}
 
 /* Terminal title */
-.terminal-title{padding:6px 10px;font-size:11px;text-transform:uppercase;font-weight:700;letter-spacing:1px;color:#bbb;background:#1e1e1e;border-top:1px solid #333;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center}
-.terminal-actions{display:flex;gap:5px}
-.terminal-action{cursor:pointer;opacity:0.7;transition:opacity 0.2s}
-.terminal-action:hover{opacity:1}
+.terminal-title{padding:6px 10px;font-size:11px;text-transform:uppercase;font-weight:700;letter-spacing:1px;color:#bbb;background:#1e1e1e;border-top:1px solid #333;border-bottom:1px solid #333}
 
 /* Editor / terminal column */
 #editor-container{flex-grow:1;display:flex;flex-direction:column;background:#1e1e1e}
@@ -50,20 +44,19 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
     color:#d4d4d4;
     overflow-y:auto;
     padding:10px;
-    font-family:'JetBrains Mono', Consolas, monospace;
+    font-family:Consolas,monospace;
     border-top:1px solid #333;
     box-shadow:inset 0 0 8px rgba(0,0,0,.6);
 }
 /* Input row inside terminal */
 .terminal-input-line{display:flex;align-items:center;margin-top:4px}
-.prompt{color:#0dbc79;font-family:'JetBrains Mono', Consolas, monospace;margin-right:6px}
-#terminal-input{flex:1;min-width:0;background:transparent;border:none;color:#fff;font-family:inherit;outline:none;font-size:13px}
+.prompt{color:#0dbc79;font-family:Consolas,monospace;margin-right:6px}
+#terminal-input{flex:1;min-width:0;background:transparent;border:none;color:#fff;font-family:inherit;outline:none}
 
-.terminal-output{white-space:pre-wrap;margin:2px 0;font-size:13px;line-height:1.4}
+.terminal-output{white-space:pre-wrap;margin:2px 0;font-size:13px}
 .terminal-output.cmd   {color:#0dbc79}
 .terminal-output.out   {color:#d4d4d4}
 .terminal-output.error {color:#f14c4c}
-.terminal-output.system{color:#3794ff}
 
 /* File‑tree */
 .file-tree{list-style:none;padding:0;margin:0;background:#252526}
@@ -96,25 +89,6 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
 .context-menu-item.danger{color:#f14c4c}
 .context-menu-item.danger:hover{background:#3c1f1f;color:#ff6b6b}
 
-/* Status bar */
-#status-bar{height:22px;background:#007acc;color:#fff;font-size:12px;display:flex;align-items:center;padding:0 10px;user-select:none}
-.status-item{margin-right:15px;display:flex;align-items:center}
-.status-item i{margin-right:5px;font-size:14px}
-.connection-status{display:flex;align-items:center}
-.status-dot{width:8px;height:8px;border-radius:50%;margin-right:5px}
-.status-dot.connected{background:#3ECF8E}
-.status-dot.disconnected{background:#f14c4c}
-
-/* Tabs bar */
-#tabs-bar{height:35px;background:#252526;display:flex;align-items:center;overflow-x:auto;user-select:none;border-bottom:1px solid #333}
-.tab{height:100%;padding:0 10px;display:flex;align-items:center;background:#2D2D2D;border-right:1px solid #1e1e1e;min-width:100px;max-width:200px;position:relative}
-.tab.active{background:#1e1e1e}
-.tab-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#ccc;font-size:13px}
-.tab.active .tab-title{color:#fff}
-.tab-close{margin-left:8px;opacity:0.7;cursor:pointer;color:#ccc;display:flex;align-items:center}
-.tab-close:hover{opacity:1;color:#fff}
-.tab-icon{margin-right:5px;font-size:14px;color:#ccc}
-
 /* No context message */
 .no-context-message {
     position: absolute;
@@ -143,27 +117,7 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
     padding: 10px;
     border-radius: 4px;
     margin: 15px 0;
-    font-family: 'JetBrains Mono', Consolas, monospace;
-}
-
-/* Tooltips */
-.tooltip {
-    position: relative;
-}
-.tooltip:hover::after {
-    content: attr(data-tooltip);
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    padding: 5px 10px;
-    background: #252526;
-    color: #fff;
-    border-radius: 3px;
-    font-size: 12px;
-    white-space: nowrap;
-    z-index: 1000;
-    box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    font-family: Consolas, monospace;
 }
 </style>
 </head>
@@ -181,20 +135,7 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
 <div id="container">
     <!-- Explorer -->
     <div id="file-explorer">
-        <div class="explorer-title">
-            <span>EXPLORER</span>
-            <div class="explorer-actions">
-                <div class="explorer-action tooltip" onclick="createNewFile()" data-tooltip="New File">
-                    <i class="mdi mdi-file-plus"></i>
-                </div>
-                <div class="explorer-action tooltip" onclick="createNewFolder()" data-tooltip="New Folder">
-                    <i class="mdi mdi-folder-plus"></i>
-                </div>
-                <div class="explorer-action tooltip" onclick="refreshTree()" data-tooltip="Refresh">
-                    <i class="mdi mdi-refresh"></i>
-                </div>
-            </div>
-        </div>
+        <div class="explorer-title">EXPLORER</div>
         <div id="file-tree-container"></div>
     </div>
 
@@ -203,42 +144,15 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
 
     <!-- Editor + horizontal resizer + terminal -->
     <div id="editor-container">
-        <!-- Tabs bar -->
-        <div id="tabs-bar"></div>
-        
         <div id="monaco-editor"></div>
         <div id="h-resizer"></div>
-        
-        <div class="terminal-title">
-            <span>TERMINAL</span>
-            <div class="terminal-actions">
-                <div class="terminal-action tooltip" onclick="clearTerminal()" data-tooltip="Clear">
-                    <i class="mdi mdi-delete-sweep"></i>
-                </div>
-                <div class="terminal-action tooltip" onclick="toggleTerminal()" data-tooltip="Toggle Terminal">
-                    <i class="mdi mdi-arrow-up-down"></i>
-                </div>
-            </div>
-        </div>
+        <div class="terminal-title">Terminal</div>
         <div id="terminal">
-            <div id="terminal-output">
-                <div class="terminal-output system">Welcome to Dev Environment Terminal</div>
-                <div class="terminal-output system">Type 'help' for available commands</div>
-            </div>
+            <div id="terminal-output"></div>
             <div class="terminal-input-line">
                 <span class="prompt">$</span>
                 <input id="terminal-input" placeholder="Enter command…">
             </div>
-        </div>
-        
-        <!-- Status bar -->
-        <div id="status-bar">
-            <div class="status-item connection-status">
-                <div class="status-dot connected"></div>
-                <span>Connected</span>
-            </div>
-            <div class="status-item" id="current-file-path"></div>
-            <div class="status-item" id="line-col"></div>
         </div>
     </div>
 </div>
@@ -278,185 +192,22 @@ document.addEventListener('contextmenu',e=>{
 document.addEventListener('click',hideContextMenu);
 
 /*─────────────────────────────────────────────────────────────
-  Terminal helpers
-─────────────────────────────────────────────────────────────*/
-function clearTerminal() {
-    document.getElementById('terminal-output').innerHTML = '';
-    appendToTerminal('Terminal cleared', 'system');
-}
-
-function toggleTerminal() {
-    const terminal = document.getElementById('terminal');
-    const currentHeight = terminal.offsetHeight;
-    
-    if (currentHeight <= 30) {
-        // Terminal is minimized, restore it
-        terminal.style.height = '200px';
-    } else {
-        // Terminal is showing, minimize it
-        terminal.style.height = '30px';
-    }
-    
-    // Relayout Monaco
-    if(window.editor) window.editor.layout();
-}
-
-/*─────────────────────────────────────────────────────────────
   Icon map
 ─────────────────────────────────────────────────────────────*/
 const fileIcons={py:'language-python',js:'language-javascript',jsx:'language-javascript',ts:'language-typescript',tsx:'language-typescript',html:'language-html5',css:'language-css3',scss:'language-sass',less:'language-less',php:'language-php',java:'language-java',cpp:'language-cpp',c:'language-c',cs:'language-csharp',go:'language-go',rb:'language-ruby',rs:'language-rust',swift:'language-swift',kt:'language-kotlin',json:'code-json',xml:'code-tags',svg:'svg',vue:'vuejs',react:'react',yml:'code-braces',yaml:'code-braces',toml:'code-braces',ini:'code-braces',conf:'cog',config:'cog',dockerfile:'docker','docker-compose.yml':'docker','docker-compose.yaml':'docker',sh:'console',bash:'console',zsh:'console',fish:'console',md:'language-markdown',txt:'text',pdf:'file-pdf-box',doc:'file-word-box',docx:'file-word-box',xls:'file-excel-box',xlsx:'file-excel-box',ppt:'file-powerpoint-box',pptx:'file-powerpoint-box',sql:'database',sqlite:'database',sqlite3:'database',db:'database',png:'file-image',jpg:'file-image',jpeg:'file-image',gif:'file-image',ico:'file-image',webp:'file-image',zip:'zip-box',rar:'zip-box','7z':'zip-box',tar:'zip-box',gz:'zip-box','.gitignore':'git','.gitmodules':'git','.gitattributes':'git','package.json':'nodejs','package-lock.json':'nodejs','requirements.txt':'language-python',Pipfile:'language-python','poetry.lock':'language-python','composer.json':'language-php',Gemfile:'language-ruby','pom.xml':'language-java','build.gradle':'language-java',default:'file-document-outline'};
-function getFileIcon(name){
-    if(fileIcons[name.toLowerCase()])return fileIcons[name.toLowerCase()];
-    const ext=name.split('.').pop().toLowerCase();
-    return fileIcons[ext]||fileIcons.default
-}
-
-/*─────────────────────────────────────────────────────────────
-  Tabs management
-─────────────────────────────────────────────────────────────*/
-const openTabs = new Map(); // path -> { model, viewState }
-let activeTab = null;
-
-function createTab(path, name, model) {
-    // Check if tab already exists
-    if (document.querySelector(`.tab[data-path="${path}"]`)) {
-        activateTab(path);
-        return;
-    }
-    
-    const tabsBar = document.getElementById('tabs-bar');
-    const tab = document.createElement('div');
-    tab.className = 'tab';
-    tab.dataset.path = path;
-    
-    const ext = name.split('.').pop().toLowerCase();
-    const iconClass = 'mdi-' + (fileIcons[ext] || fileIcons.default);
-    
-    tab.innerHTML = `
-        <i class="mdi ${iconClass} tab-icon"></i>
-        <div class="tab-title">${name}</div>
-        <div class="tab-close" onclick="closeTab('${path}', event)">
-            <i class="mdi mdi-close"></i>
-        </div>
-    `;
-    
-    tab.addEventListener('click', () => activateTab(path));
-    tabsBar.appendChild(tab);
-    
-    // Store model and initial view state
-    openTabs.set(path, { 
-        model: model,
-        viewState: null,
-        name: name
-    });
-    
-    activateTab(path);
-}
-
-function activateTab(path) {
-    // Save current tab view state if exists
-    if (activeTab) {
-        const tabInfo = openTabs.get(activeTab);
-        if (tabInfo) {
-            tabInfo.viewState = editor.saveViewState();
-            openTabs.set(activeTab, tabInfo);
-        }
-        
-        // Remove active class from current tab
-        const currentActiveTab = document.querySelector('.tab.active');
-        if (currentActiveTab) {
-            currentActiveTab.classList.remove('active');
-        }
-    }
-    
-    // Activate new tab
-    const tab = document.querySelector(`.tab[data-path="${path}"]`);
-    if (tab) {
-        tab.classList.add('active');
-        document.getElementById('current-file-path').textContent = path;
-    }
-    
-    // Set editor model
-    const tabInfo = openTabs.get(path);
-    if (tabInfo) {
-        editor.setModel(tabInfo.model);
-        if (tabInfo.viewState) {
-            editor.restoreViewState(tabInfo.viewState);
-        }
-        editor.focus();
-    }
-    
-    activeTab = path;
-}
-
-function closeTab(path, event) {
-    if (event) {
-        event.stopPropagation();
-    }
-    
-    // Remove tab element
-    const tab = document.querySelector(`.tab[data-path="${path}"]`);
-    if (tab) {
-        tab.remove();
-    }
-    
-    // Cleanup tab data
-    const tabInfo = openTabs.get(path);
-    if (tabInfo && tabInfo.model) {
-        tabInfo.model.dispose();
-    }
-    openTabs.delete(path);
-    
-    // If this was the active tab, activate another tab if available
-    if (activeTab === path) {
-        const remainingTabs = Array.from(openTabs.keys());
-        if (remainingTabs.length > 0) {
-            activateTab(remainingTabs[0]);
-        } else {
-            activeTab = null;
-            editor.setModel(null);
-            document.getElementById('current-file-path').textContent = '';
-        }
-    }
-}
+function getFileIcon(name){if(fileIcons[name.toLowerCase()])return fileIcons[name.toLowerCase()];const ext=name.split('.').pop().toLowerCase();return fileIcons[ext]||fileIcons.default}
 
 /*─────────────────────────────────────────────────────────────
   Monaco boot‑strap
 ─────────────────────────────────────────────────────────────*/
-require.config({paths:{vs:'https://cdn.jsdelivr.net/npm/monaco-editor@0.40.0/min/vs'}});
+require.config({paths:{vs:'https://cdn.jsdelivr.net/npm/monaco-editor@0.34.0/min/vs'}});
 require(['vs/editor/editor.main'],()=>{
 
-const editor=monaco.editor.create(document.getElementById('monaco-editor'),{
-    value:'',
-    language:'javascript',
-    theme:'vs-dark',
-    automaticLayout:true,
-    minimap: { enabled: true },
-    scrollBeyondLastLine: false,
-    lineNumbers: 'on',
-    renderWhitespace: 'all',
-    fontFamily: "'JetBrains Mono', Consolas, 'Courier New', monospace",
-    fontSize: 14,
-    fontLigatures: true
-});
-
+const editor=monaco.editor.create(document.getElementById('monaco-editor'),{value:'',language:'javascript',theme:'vs-dark',automaticLayout:true});
 // expose for other handlers
 window.editor = editor;
 
-// Update line/column display
-editor.onDidChangeCursorPosition(e => {
-    document.getElementById('line-col').textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
-});
-
-// Add keyboard shortcuts
-editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, saveFile);
-editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, () => {
-    // Implement command palette
-    appendToTerminal('Command palette not implemented yet', 'system');
-});
-
-let currentFile='';
-let activeItem=null;
+let currentFile='';let activeItem=null;
 
 /*── render tree ──────────────────────────────────────────*/
 function renderFileTree(items,isRoot=false,depth=1){
@@ -530,7 +281,7 @@ function loadFileTree(){
     })
     .catch(err=>appendToTerminal('Error loading file tree: '+err,'error'));
 }
-window.refreshTree=loadFileTree;
+const refreshTree=loadFileTree;
 
 /*── open file ───────────────────────────────────────────*/
 function openFile(path,element){
@@ -554,15 +305,9 @@ function openFile(path,element){
             appendToTerminal('Error opening file: ' + data.error, 'error');
             return;
         }
-        const fileName = path.split('/').pop();
         const ext=path.split('.').pop();
         const lang=monaco.languages.getLanguages().find(l=>l.extensions?.includes('.'+ext))?.id||'plaintext';
-        
-        // Create model for file
-        const model = monaco.editor.createModel(data.content, lang);
-        
-        // Create a tab for this file
-        createTab(path, fileName, model);
+        editor.setModel(monaco.editor.createModel(data.content,lang));
     })
     .catch(err => appendToTerminal('Error opening file: ' + err, 'error'));
 }
@@ -570,26 +315,16 @@ function openFile(path,element){
 /*── auto‑save ───────────────────────────────────────────*/
 let saveTimeout;
 editor.onDidChangeModelContent(()=>{
-    if(!activeTab)return;
+    if(!currentFile)return;
     clearTimeout(saveTimeout);
     saveTimeout=setTimeout(saveFile,1000);
-    
-    // Show unsaved indicator
-    const tab = document.querySelector(`.tab[data-path="${activeTab}"]`);
-    if (tab) {
-        const title = tab.querySelector('.tab-title');
-        if (!title.textContent.startsWith('*')) {
-            title.textContent = '* ' + title.textContent;
-        }
-    }
 });
-
 function saveFile(){
-    if(!activeTab)return;
+    if(!currentFile)return;
 
     // Create request data with path, content, and optional project_id or conversation_id
     const requestData = { 
-        path: activeTab,
+        path: currentFile,
         content: editor.getValue()
     };
     if (projectId) requestData.project_id = projectId;
@@ -605,20 +340,11 @@ function saveFile(){
             appendToTerminal('Error saving file: ' + data.error, 'error');
             return;
         }
-        appendToTerminal('File saved: '+activeTab,'out');
-        
-        // Remove unsaved indicator
-        const tab = document.querySelector(`.tab[data-path="${activeTab}"]`);
-        if (tab) {
-            const title = tab.querySelector('.tab-title');
-            if (title.textContent.startsWith('* ')) {
-                const tabInfo = openTabs.get(activeTab);
-                title.textContent = tabInfo ? tabInfo.name : title.textContent.substring(2);
-            }
-        }
+        appendToTerminal('File saved: '+currentFile,'out');
     })
     .catch(err=>appendToTerminal('Error saving file: '+err,'error'));
 }
+editor.addCommand(monaco.KeyMod.CtrlCmd|monaco.KeyCode.KeyS,saveFile);
 
 /*── CRUD (create / rename / delete) ─────────────────────*/
 window.createNewFile=function(){
@@ -644,3 +370,205 @@ window.createNewFile=function(){
     .catch(err=>appendToTerminal('Error creating file: '+err,'error'))
     .finally(hideContextMenu);
 };
+window.createNewFolder=function(){
+    const name=prompt('Enter folder name:');if(!name)return hideContextMenu();
+    const base=contextMenuTarget?.dataset.path??'';const path=base?`${base}/${name}`:name;
+    
+    // Create request data with path and optional project_id or conversation_id
+    const requestData = { path };
+    if (projectId) requestData.project_id = projectId;
+    if (conversationId) requestData.conversation_id = conversationId;
+
+    fetch('/coding/create_folder/',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(requestData)
+    })
+    .then(r=>r.json())
+    .then(res=>{
+        res.error ? appendToTerminal('Error creating folder: '+res.error,'error')
+                  : appendToTerminal('Folder created: '+path,'out');
+        refreshTree();
+    })
+    .catch(err=>appendToTerminal('Error creating folder: '+err,'error'))
+    .finally(hideContextMenu);
+};
+window.renameItem=function(){
+    if(!contextMenuTarget)return hideContextMenu();
+    const old=contextMenuTarget.dataset.path;
+    const curName=contextMenuTarget.textContent.trim();
+    const newName=prompt('Enter new name:',curName);
+    if(!newName||newName===curName)return hideContextMenu();
+    const parent=old.substring(0,old.lastIndexOf('/'));
+    const newPath=parent?`${parent}/${newName}`:newName;
+    
+    // Create request data with paths and optional project_id or conversation_id
+    const requestData = { old_path: old, new_path: newPath };
+    if (projectId) requestData.project_id = projectId;
+    if (conversationId) requestData.conversation_id = conversationId;
+
+    fetch('/coding/rename_item/',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(requestData)
+    })
+    .then(r=>r.json())
+    .then(res=>{
+        res.error ? appendToTerminal('Error renaming: '+res.error,'error')
+                  : appendToTerminal(`Renamed ${old} ➜ ${newPath}`,'out');
+        refreshTree();
+    })
+    .catch(err=>appendToTerminal('Error renaming item: '+err,'error'))
+    .finally(hideContextMenu);
+};
+window.deleteItem=function(){
+    if(!contextMenuTarget)return hideContextMenu();
+    const path=contextMenuTarget.dataset.path;
+    const isDir=!!contextMenuTarget.querySelector('.mdi-folder,.mdi-folder-hidden');
+    const type=isDir?'folder':'file';
+    if(!confirm(`Delete this ${type}?\n${path}`))return hideContextMenu();
+    
+    // Create request data with path, is_directory, and optional project_id or conversation_id
+    const requestData = { path, is_directory: isDir };
+    if (projectId) requestData.project_id = projectId;
+    if (conversationId) requestData.conversation_id = conversationId;
+
+    fetch('/coding/delete_item/',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(requestData)
+    })
+    .then(r=>r.json())
+    .then(res=>{
+        res.error ? appendToTerminal('Error deleting: '+res.error,'error')
+                  : appendToTerminal(`Deleted ${type}: ${path}`,'out');
+        if(path===currentFile){
+            editor.setModel(monaco.editor.createModel('','plaintext'));
+            currentFile='';
+            if(activeItem)activeItem.classList.remove('active');
+        }
+        refreshTree();
+    })
+    .catch(err=>appendToTerminal('Error deleting item: '+err,'error'))
+    .finally(hideContextMenu);
+};
+
+/*─────────────────────────────────────────────────────────
+  Terminal
+─────────────────────────────────────────────────────────*/
+const tIn=document.getElementById('terminal-input');
+const tOut=document.getElementById('terminal-output');
+
+tIn.addEventListener('keypress',e=>{
+    if(e.key!=='Enter')return;
+    const cmd=e.target.value.trim();
+    e.target.value='';
+    if(!cmd){
+        /* If user just hits Enter, echo a blank prompt line */
+        appendToTerminal('$','cmd');
+        return;
+    }
+
+    /* built‑ins -----------------------------------------------------*/
+    if(cmd==='clear'||cmd==='cls'){tOut.innerHTML='';return;}
+
+    appendToTerminal('$ '+cmd,'cmd');
+    
+    // Create request data with command and optional project_id or conversation_id
+    const requestData = { command: cmd };
+    if (projectId) requestData.project_id = projectId;
+    if (conversationId) requestData.conversation_id = conversationId;
+
+    fetch('/coding/execute_command/',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(requestData)
+    })
+    .then(r=>r.json())
+    .then(res=>{
+        if (res.error) {
+            appendToTerminal(res.error, 'error');
+            return;
+        }
+        if(res.stdout)appendToTerminal(res.stdout,'out');
+        if(res.stderr)appendToTerminal(res.stderr,'error');
+    })
+    .catch(err=>appendToTerminal('Error executing command: '+err,'error'));
+});
+
+function appendToTerminal(text,type='out'){
+    const div=document.createElement('div');
+    div.className='terminal-output '+type;
+    div.textContent=text;
+    tOut.appendChild(div);
+    /* Auto‑scroll terminal container */
+    const termEl=document.getElementById('terminal');
+    termEl.scrollTop=termEl.scrollHeight;
+}
+
+/*─────────────────────────────────────────────────────────
+  Initial load
+─────────────────────────────────────────────────────────*/
+loadFileTree();
+});/* end require */
+
+/*─────────────────────────────────────────────────────────────
+  Vertical resizer (explorer width)
+─────────────────────────────────────────────────────────────*/
+const resizer=document.getElementById('resizer');
+const fileExplorer=document.getElementById('file-explorer');
+let xDrag=false,lastX=0;
+resizer.addEventListener('mousedown',e=>{
+    xDrag=true;lastX=e.clientX;
+    resizer.classList.add('dragging');document.body.classList.add('dragging');
+});
+document.addEventListener('mousemove',e=>{
+    if(!xDrag)return;
+    const dx=e.clientX-lastX;lastX=e.clientX;
+    const w=fileExplorer.offsetWidth+dx;
+    if(w>=100&&w<=600)fileExplorer.style.width=w+'px';
+});
+document.addEventListener('mouseup',()=>{
+    if(!xDrag)return;
+    xDrag=false;resizer.classList.remove('dragging');document.body.classList.remove('dragging');
+});
+
+/*─────────────────────────────────────────────────────────────
+  Horizontal resizer (terminal height)
+─────────────────────────────────────────────────────────────*/
+const hRes=document.getElementById('h-resizer');
+const termEl=document.getElementById('terminal');
+let yDrag=false,startY=0,startH=0;
+
+hRes.addEventListener('mousedown', e=> {
+    yDrag=true;
+    startY=e.clientY;
+    startH=termEl.offsetHeight;
+    console.log('h-resizer mousedown', {startY, startH});
+    hRes.classList.add('dragging');
+    document.body.classList.add('dragging');
+});
+
+document.addEventListener('mousemove',e=>{
+    if(!yDrag)
+        return;
+    const dy=startY - e.clientY;            /* up = larger terminal */
+    const newH=startH + dy;                /* invert direction */
+    console.log('h-resizer mousemove', {dy, newH});
+    if(newH < 100 || newH > window.innerHeight*0.8) return;
+    termEl.style.height=newH+'px';
+    const monEl=document.getElementById('monaco-editor');
+    monEl.style.height=newH+'px';
+    /* Let flexbox handle editor height, just relayout Monaco */
+    if(window.editor)window.editor.layout();
+});
+
+document.addEventListener('mouseup',()=>{
+    if(!yDrag)return;
+    yDrag=false;hRes.classList.remove('dragging');document.body.classList.remove('dragging');
+    console.log('h-resizer mouseup', {finalHeight: termEl.offsetHeight});
+});
+</script>
+{% endif %}
+</body>
+</html>

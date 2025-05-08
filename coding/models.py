@@ -233,3 +233,70 @@ class KubernetesPod(models.Model):
         """Mark the pod as having an error."""
         self.status = 'error'
         self.save()
+
+
+class KubernetesPortMapping(models.Model):
+    """
+    Model to store port mappings for Kubernetes pods.
+    Each Kubernetes pod can have multiple port mappings for different services.
+    """
+    pod = models.ForeignKey(
+        KubernetesPod,
+        on_delete=models.CASCADE,
+        related_name='port_mappings',
+        help_text="Kubernetes pod this port mapping belongs to"
+    )
+    container_name = models.CharField(
+        max_length=255,
+        help_text="Name of the container within the pod"
+    )
+    container_port = models.IntegerField(
+        help_text="Port number inside the container"
+    )
+    service_port = models.IntegerField(
+        help_text="Port number on the Kubernetes service"
+    )
+    node_port = models.IntegerField(
+        blank=True,
+        null=True,
+        help_text="NodePort value if exposed via NodePort service type"
+    )
+    protocol = models.CharField(
+        max_length=10,
+        default="TCP",
+        help_text="Protocol for this port (TCP, UDP)"
+    )
+    service_name = models.CharField(
+        max_length=255,
+        help_text="Name of the service exposing this port"
+    )
+    description = models.CharField(
+        max_length=512,
+        blank=True,
+        null=True,
+        help_text="Description of the service running on this port"
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When the port mapping was created"
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        help_text="When the port mapping was last updated"
+    )
+    
+    class Meta:
+        indexes = [
+            models.Index(fields=['pod']),
+            models.Index(fields=['container_name']),
+            models.Index(fields=['service_name']),
+            models.Index(fields=['container_port']),
+        ]
+        verbose_name = "Kubernetes Port Mapping"
+        verbose_name_plural = "Kubernetes Port Mappings"
+        unique_together = [
+            ('pod', 'container_name', 'container_port'),
+        ]
+    
+    def __str__(self):
+        return f"{self.service_name}: {self.container_port} ({self.container_name}) for pod {self.pod.pod_name}"
