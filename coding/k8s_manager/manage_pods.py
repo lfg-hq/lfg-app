@@ -215,117 +215,8 @@ def check_pod_status(client, namespace, pod_name=None):
             client, f"kubectl get namespace {namespace} || kubectl create namespace {namespace}"
         )
         
-        # First check for any pods with the app label for this namespace
-        success, stdout, stderr = execute_remote_command(
-            client, f"kubectl get pods -n {namespace} -l app={namespace} -o json"
-        )
-        
-        if success:
-            try:
-                pod_data = json.loads(stdout)
-                pods = pod_data.get('items', [])
-                
-                if pods:
-                    # We found pods with the app label, use the first one
-                    pod = pods[0]
-                    actual_pod_name = pod.get('metadata', {}).get('name', '')
-                    logger.info(f"Found pod with app={namespace} label: {actual_pod_name}")
-                    
-                    # If a specific pod_name was requested, check if it matches any of the found pods
-                    if pod_name:
-                        matching_pod = None
-                        for p in pods:
-                            if p.get('metadata', {}).get('name') == pod_name:
-                                matching_pod = p
-                                break
-                        
-                        # If we found the specific pod requested, use it instead
-                        if matching_pod:
-                            pod = matching_pod
-                            actual_pod_name = pod_name
-                            logger.info(f"Using specifically requested pod: {pod_name}")
-                    
-                    phase = pod.get('status', {}).get('phase', '')
-                    
-                    # Check that the phase is "Running"
-                    if phase.lower() != 'running':
-                        logger.info(f"Pod {actual_pod_name} phase is {phase}, not Running")
-                        return True, False, pod
-                    
-                    # Also check that all containers are ready
-                    container_statuses = pod.get('status', {}).get('containerStatuses', [])
-                    all_containers_ready = True
-                    
-                    for container in container_statuses:
-                        if not container.get('ready', False):
-                            container_name = container.get('name', 'unknown')
-                            state = container.get('state', {})
-                            reason = "unknown"
-                            
-                            # Check for container state reasons
-                            if 'waiting' in state:
-                                reason = state['waiting'].get('reason', 'waiting')
-                            elif 'terminated' in state:
-                                reason = state['terminated'].get('reason', 'terminated')
-                            
-                            logger.warning(f"Container {container_name} in pod {actual_pod_name} is not ready. State: {reason}")
-                            all_containers_ready = False
-                    
-                    # Only consider pod running if phase is Running AND all containers are ready
-                    return True, phase.lower() == 'running' and all_containers_ready, pod
-                
-                # If no pods found with app label but a specific pod_name was requested, try to find it directly
-                if pod_name:
-                    logger.info(f"No pods found with app={namespace} label, checking for specific pod {pod_name}")
-                    success, stdout, stderr = execute_remote_command(
-                        client, f"kubectl get pod {pod_name} -n {namespace} -o json"
-                    )
-                    
-                    if success:
-                        try:
-                            pod_data = json.loads(stdout)
-                            
-                            if pod_data.get('metadata', {}).get('name'):
-                                phase = pod_data.get('status', {}).get('phase', '')
-                                
-                                # Check that the phase is "Running"
-                                if phase.lower() != 'running':
-                                    logger.info(f"Pod {pod_name} phase is {phase}, not Running")
-                                    return True, False, pod_data
-                                
-                                # Also check that all containers are ready
-                                container_statuses = pod_data.get('status', {}).get('containerStatuses', [])
-                                all_containers_ready = True
-                                
-                                for container in container_statuses:
-                                    if not container.get('ready', False):
-                                        container_name = container.get('name', 'unknown')
-                                        state = container.get('state', {})
-                                        reason = "unknown"
-                                        
-                                        # Check for container state reasons
-                                        if 'waiting' in state:
-                                            reason = state['waiting'].get('reason', 'waiting')
-                                        elif 'terminated' in state:
-                                            reason = state['terminated'].get('reason', 'terminated')
-                                        
-                                        logger.warning(f"Container {container_name} in pod {pod_name} is not ready. State: {reason}")
-                                        all_containers_ready = False
-                                
-                                # Only consider pod running if phase is Running AND all containers are ready
-                                return True, phase.lower() == 'running' and all_containers_ready, pod_data
-                        except json.JSONDecodeError:
-                            logger.error(f"Failed to parse pod JSON data: {stdout}")
-                
-                # If we get here, we didn't find any pods with app label or the specific pod_name
-                logger.info(f"No pods found in namespace {namespace}")
-                return False, False, {}
-                
-            except json.JSONDecodeError:
-                logger.error(f"Failed to parse pod JSON data: {stdout}")
-        
-        # Fallback: look for any pods in the namespace
-        logger.info(f"Looking for any pods in namespace {namespace}")
+        # Fetch all pods in the namespace with a single command
+        # We'll filter them programmatically instead of using multiple kubectl calls
         success, stdout, stderr = execute_remote_command(
             client, f"kubectl get pods -n {namespace} -o json"
         )
@@ -335,28 +226,64 @@ def check_pod_status(client, namespace, pod_name=None):
                 pod_data = json.loads(stdout)
                 pods = pod_data.get('items', [])
                 
-                if pods:
-                    # Use the first pod we find
+                if not pods:
+                    logger.info(f"No pods found in namespace {namespace}")
+                    return False, False, {}
+                
+                # First try to find pods with the app label
+                labeled_pods = [p for p in pods if p.get('metadata', {}).get('labels', {}).get('app') == namespace]
+                
+                # Then try to find the specific pod if requested
+                specific_pod = None
+                if pod_name:
+                    specific_pod = next((p for p in pods if p.get('metadata', {}).get('name') == pod_name), None)
+                
+                # Decide which pod to use based on priorities:
+                # 1. Specifically requested pod by name
+                # 2. Pod with matching app label
+                # 3. Any pod in the namespace
+                pod = None
+                if specific_pod:
+                    pod = specific_pod
+                    actual_pod_name = pod_name
+                    logger.info(f"Using specifically requested pod: {pod_name}")
+                elif labeled_pods:
+                    pod = labeled_pods[0]
+                    actual_pod_name = pod.get('metadata', {}).get('name', '')
+                    logger.info(f"Found pod with app={namespace} label: {actual_pod_name}")
+                else:
                     pod = pods[0]
                     actual_pod_name = pod.get('metadata', {}).get('name', '')
-                    logger.info(f"Found pod in namespace: {actual_pod_name}")
-                    
-                    phase = pod.get('status', {}).get('phase', '')
-                    
-                    if phase.lower() != 'running':
-                        logger.info(f"Pod {actual_pod_name} phase is {phase}, not Running")
-                        return True, False, pod
-                    
-                    # Check container readiness
-                    container_statuses = pod.get('status', {}).get('containerStatuses', [])
-                    all_containers_ready = True
-                    
-                    for container in container_statuses:
-                        if not container.get('ready', False):
-                            all_containers_ready = False
-                            break
-                    
-                    return True, phase.lower() == 'running' and all_containers_ready, pod
+                    logger.info(f"Using first available pod in namespace: {actual_pod_name}")
+                
+                # Check pod phase
+                phase = pod.get('status', {}).get('phase', '')
+                if phase.lower() != 'running':
+                    logger.info(f"Pod {actual_pod_name} phase is {phase}, not Running")
+                    return True, False, pod
+                
+                # Check if all containers are ready
+                container_statuses = pod.get('status', {}).get('containerStatuses', [])
+                all_containers_ready = True
+                
+                for container in container_statuses:
+                    if not container.get('ready', False):
+                        container_name = container.get('name', 'unknown')
+                        state = container.get('state', {})
+                        reason = "unknown"
+                        
+                        # Check for container state reasons
+                        if 'waiting' in state:
+                            reason = state['waiting'].get('reason', 'waiting')
+                        elif 'terminated' in state:
+                            reason = state['terminated'].get('reason', 'terminated')
+                        
+                        logger.warning(f"Container {container_name} in pod {actual_pod_name} is not ready. State: {reason}")
+                        all_containers_ready = False
+                
+                # Only consider pod running if phase is Running AND all containers are ready
+                return True, phase.lower() == 'running' and all_containers_ready, pod
+                
             except json.JSONDecodeError:
                 logger.error(f"Failed to parse pod JSON data: {stdout}")
         
