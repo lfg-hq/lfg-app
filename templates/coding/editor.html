@@ -313,11 +313,11 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
 
 <!-- Context‑menu -->
 <div id="context-menu" class="context-menu" style="display:none">
-    <div class="context-menu-item" onclick="createNewFile()"><i class="mdi mdi-file-plus"></i>New File</div>
-    <div class="context-menu-item" onclick="createNewFolder()"><i class="mdi mdi-folder-plus"></i>New Folder</div>
+    <div class="context-menu-item" onclick="createNewFile()" data-action="new-file"><i class="mdi mdi-file-plus"></i>New File</div>
+    <div class="context-menu-item" onclick="createNewFolder()" data-action="new-folder"><i class="mdi mdi-folder-plus"></i>New Folder</div>
     <div class="context-menu-separator"></div>
-    <div class="context-menu-item" onclick="renameItem()"><i class="mdi mdi-pencil"></i>Rename</div>
-    <div class="context-menu-item danger" onclick="deleteItem()"><i class="mdi mdi-delete"></i>Delete</div>
+    <div class="context-menu-item" onclick="renameItem()" data-action="rename"><i class="mdi mdi-pencil"></i>Rename</div>
+    <div class="context-menu-item danger" onclick="deleteItem()" data-action="delete"><i class="mdi mdi-delete"></i>Delete</div>
 </div>
 
 <script>
@@ -325,8 +325,8 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
   Global file tree functions (accessible outside Monaco scope)
 ─────────────────────────────────────────────────────────────*/
 // Declare function in the global scope
-function loadFileTree() {
-    console.log("Loading file tree from Kubernetes pod...");
+function loadFileTree(forceRefresh = false) {
+    console.log("Loading file tree from Kubernetes pod...", forceRefresh ? "(Force refresh)" : "");
     
     // Track expanded folders and scroll position
     const container = document.getElementById('file-tree-container');
@@ -342,7 +342,10 @@ function loadFileTree() {
     container.appendChild(loadingIndicator);
     
     // Create request data
-    const requestData = { workspace_dir: "/workspace" };
+    const requestData = { 
+        workspace_dir: "/workspace",
+        force_refresh: forceRefresh  // Add a flag to indicate this is a forced refresh
+    };
     if (window.projectId) requestData.project_id = window.projectId;
     if (window.conversationId) requestData.conversation_id = window.conversationId;
     if (window.podToken) requestData.token = window.podToken;
@@ -370,20 +373,29 @@ function loadFileTree() {
                         }
                     });
                 }
+                
+                // If force refresh was requested and we still got an error, try using terminal check as fallback
+                if (forceRefresh) {
+                    console.log("Force refresh failed, trying terminal check as fallback");
+                    setTimeout(checkForFilesInTerminal, 300);
+                }
+                
                 container.innerHTML = `<div class="error-message">Error loading files: ${data.error}</div>`;
                 return;
             }
             
             container.innerHTML = '';
             
-        if (data.error) {
-                console.error("Error loading file tree:", data.error);
-                container.innerHTML = `<div class="error-message">Error loading files: ${data.error}</div>`;
-            return;
-        }
-            
             if (!data.files || data.files.length === 0) {
                 console.log("No files found in Kubernetes pod workspace");
+                
+                // If this was a force refresh, also try a terminal check
+                if (forceRefresh) {
+                    console.log("Force refresh found no files, trying terminal check");
+                    setTimeout(checkForFilesInTerminal, 300);
+                    return;
+                }
+                
                 container.innerHTML = `
                     <div class="no-files-message">
                         <p>No files found in Kubernetes pod workspace.</p>
@@ -394,7 +406,7 @@ function loadFileTree() {
                 `;
                 document.getElementById('create-first-file').addEventListener('click', createFirstFile);
                 document.getElementById('check-files-terminal').addEventListener('click', checkForFilesInTerminal);
-                document.getElementById('refresh-file-tree').addEventListener('click', loadFileTree);
+                document.getElementById('refresh-file-tree').addEventListener('click', () => loadFileTree(true));
                 return;
             }
             
@@ -1197,9 +1209,12 @@ window.createFirstFile = function() {
     const fileName = prompt('Enter file name:', 'hello.py');
     if (!fileName) return;
     
+    // Ensure we don't have any path components in the filename
+    const cleanFileName = fileName.includes('/') ? fileName.split('/').pop() : fileName;
+    
     // Sample content based on file extension
     let content = '';
-    const ext = fileName.split('.').pop().toLowerCase();
+    const ext = cleanFileName.split('.').pop().toLowerCase();
     
     if (ext === 'py') {
         content = '# My first Python file\n\ndef hello():\n    print("Hello, world!")\n\nif __name__ == "__main__":\n    hello()';
@@ -1215,56 +1230,81 @@ window.createFirstFile = function() {
     
     // Create request data
     const requestData = { 
-        path: fileName,
-        content: content
+        path: cleanFileName,  // Use the clean filename without any path
+        content: content,
+        type: 'file'
     };
     if (window.projectId) requestData.project_id = window.projectId;
     if (window.conversationId) requestData.conversation_id = window.conversationId;
+    if (window.podToken) requestData.token = window.podToken;
     
     console.log("Creating first file:", requestData);
     
-    fetch('/coding/k8s/save_file/', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(requestData)
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.error) {
-            appendToTerminal('Error creating file: ' + data.error, 'error');
-            console.error("Error creating first file:", data.error);
-            return;
-        }
-        appendToTerminal('File created: ' + fileName, 'out');
-        loadFileTree();
-        
-        // Also run the file if it's a Python file to demonstrate how it works
-        if (ext === 'py') {
-            setTimeout(() => {
-                const runCmd = { 
-                    command: `python ${fileName}`,
-                    project_id: window.projectId,
-                    conversation_id: window.conversationId
-                };
-                
-                fetch('/coding/k8s/execute_command/', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(runCmd)
-                })
-                .then(r => r.json())
-                .then(res => {
-                    if (res.stdout) appendToTerminal(res.stdout, 'out');
-                    if (res.stderr) appendToTerminal(res.stderr, 'error');
-                })
-                .catch(err => console.error("Error running first file:", err));
-            }, 1000);
-        }
-    })
-    .catch(err => {
-        appendToTerminal('Error creating file: ' + err, 'error');
-        console.error("Error creating first file:", err);
-    });
+    // Function to make the actual request
+    const makeRequest = () => {
+        fetch('/coding/k8s/create_item/', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(requestData)
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                // If we get a token error, try refreshing the token and retry
+                if (data.error.includes('token') && !requestData.retried) {
+                    console.log('Token error, refreshing tokens and retrying...');
+                    return updatePodTokens().then(tokens => {
+                        if (tokens && tokens.podToken) {
+                            requestData.token = tokens.podToken;
+                            requestData.retried = true;
+                            return makeRequest();
+                        } else {
+                            appendToTerminal('Error creating file: Invalid token', 'error');
+                        }
+                    });
+                }
+                appendToTerminal('Error creating file: ' + data.error, 'error');
+                console.error("Error creating first file:", data.error);
+                return;
+            }
+            appendToTerminal(data.message || 'File created: ' + cleanFileName, 'out');
+            loadFileTree();
+            
+            // Also run the file if it's a Python file to demonstrate how it works
+            if (ext === 'py') {
+                setTimeout(() => {
+                    const runCmd = { 
+                        command: `python ${cleanFileName}`,
+                        project_id: window.projectId,
+                        conversation_id: window.conversationId
+                    };
+                    
+                    fetch('/coding/k8s/execute_command/', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(runCmd)
+                    })
+                    .then(r => r.json())
+                    .then(res => {
+                        if (res.stdout) appendToTerminal(res.stdout, 'out');
+                        if (res.stderr) appendToTerminal(res.stderr, 'error');
+                    })
+                    .catch(err => console.error("Error running first file:", err));
+                }, 1000);
+            }
+        })
+        .catch(err => {
+            appendToTerminal('Error creating file: ' + err, 'error');
+            console.error("Error creating first file:", err);
+        });
+    };
+
+    // If we don't have a token, get it first
+    if (!window.podToken) {
+        updatePodTokens().then(() => makeRequest());
+    } else {
+        makeRequest();
+    }
 };
 
 /*──────────────────────────────────────────────────────────────
@@ -1387,16 +1427,86 @@ window.addEventListener('load', function() {
   Context‑menu helpers
 ─────────────────────────────────────────────────────────────*/
 let contextMenuTarget=null;
+let contextMenuPath=""; // Store the current path for context menu operations
+
 function showContextMenu(e,target){
     e.preventDefault();
     const m=document.getElementById('context-menu');
-    m.style.display='block';m.style.left=e.pageX+'px';m.style.top=e.pageY+'px';
+    
+    // Determine the current path based on the target
+    if (target) {
+        const isDirectory = target.parentElement && 
+                          target.parentElement.classList.contains('directory');
+        
+        if (isDirectory) {
+            // If target is a directory, use its path
+            contextMenuPath = target.dataset.path || '';
+        } else {
+            // If target is a file, use its parent directory
+            const filePath = target.dataset.path || '';
+            const lastSlashIndex = filePath.lastIndexOf('/');
+            if (lastSlashIndex !== -1) {
+                contextMenuPath = filePath.substring(0, lastSlashIndex);
+            } else {
+                contextMenuPath = ""; // Root if no parent directory
+            }
+        }
+    } else {
+        contextMenuPath = ""; // Root level
+    }
+    
+    // Update the context menu items to show the current path
+    const newFileItem = m.querySelector('[data-action="new-file"]');
+    const newFolderItem = m.querySelector('[data-action="new-folder"]');
+    
+    if (newFileItem) {
+        newFileItem.innerHTML = `<i class="mdi mdi-file-plus"></i>New File${contextMenuPath ? ` in /${contextMenuPath}` : ''}`;
+    }
+    
+    if (newFolderItem) {
+        newFolderItem.innerHTML = `<i class="mdi mdi-folder-plus"></i>New Folder${contextMenuPath ? ` in /${contextMenuPath}` : ''}`;
+    }
+    
+    // Show or hide rename/delete options based on target
+    const renameItem = m.querySelector('[data-action="rename"]');
+    const deleteItem = m.querySelector('[data-action="delete"]');
+    const separator = m.querySelector('.context-menu-separator');
+    
+    if (renameItem && deleteItem && separator) {
+        if (target) {
+            renameItem.style.display = '';
+            deleteItem.style.display = '';
+            separator.style.display = '';
+        } else {
+            renameItem.style.display = 'none';
+            deleteItem.style.display = 'none';
+            separator.style.display = 'none';
+        }
+    }
+    
+    m.style.display='block';
+    m.style.left=e.pageX+'px';
+    m.style.top=e.pageY+'px';
     contextMenuTarget=target;
 }
-function hideContextMenu(){document.getElementById('context-menu').style.display='none';contextMenuTarget=null}
+
+function hideContextMenu(){
+    document.getElementById('context-menu').style.display='none';
+    contextMenuTarget=null;
+}
+
 document.addEventListener('contextmenu',e=>{
-    const item=e.target.closest('#file-explorer .file-item');
-    if(item)showContextMenu(e,item);
+    // Find the closest file-item if clicked on one, or use the file-explorer container
+    const item = e.target.closest('#file-explorer .file-item');
+    const fileExplorer = e.target.closest('#file-explorer');
+    
+    if (item) {
+        // If clicked on a file/folder item, use that as target
+        showContextMenu(e, item);
+    } else if (fileExplorer) {
+        // If clicked elsewhere in the file explorer, use null as target (root level)
+        showContextMenu(e, null);
+    }
 });
 document.addEventListener('click',hideContextMenu);
 
@@ -1531,51 +1641,180 @@ function appendToTerminal(text, type='out') {
 
 /*── CRUD (create / rename / delete) ─────────────────────*/
 window.createNewFile=function(){
-    const name=prompt('Enter file name:');if(!name)return hideContextMenu();
-    const base=contextMenuTarget?.dataset.path??'';const path=base?`${base}/${name}`:name;
+    const name=prompt('Enter file name:');
+    if(!name)return hideContextMenu();
+    
+    // Use the contextMenuPath to determine where to create the file
+    let path = contextMenuPath ? `${contextMenuPath}/${name}` : name;
     
     // Create request data with path, content, and optional project_id or conversation_id
-    const requestData = { path, content: '' };
+    const requestData = {
+        path,
+        content: '',
+        type: 'file'
+    };
     if (window.projectId) requestData.project_id = window.projectId;
     if (window.conversationId) requestData.conversation_id = window.conversationId;
+    if (window.podToken) requestData.token = window.podToken;
 
-    fetch('/coding/k8s/save_file/', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(requestData)
-    })
-    .then(r=>r.json())
-    .then(res=>{
-        res.error ? appendToTerminal('Error creating file: '+res.error,'error')
-                  : appendToTerminal('File created: '+path,'out');
-        loadFileTree();
-    })
-    .catch(err=>appendToTerminal('Error creating file: '+err,'error'))
-    .finally(hideContextMenu);
+    // Function to make the actual request
+    const makeRequest = () => {
+        fetch('/coding/k8s/create_item/', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(requestData)
+        })
+        .then(r => r.json())
+        .then(res => {
+            if (res.error) {
+                // If we get a token error, try refreshing the token and retry
+                if (res.error.includes('token') && !requestData.retried) {
+                    console.log('Token error, refreshing tokens and retrying...');
+                    return updatePodTokens().then(tokens => {
+                        if (tokens && tokens.podToken) {
+                            requestData.token = tokens.podToken;
+                            requestData.retried = true;
+                            return makeRequest();
+                        } else {
+                            appendToTerminal('Error creating file: Invalid token', 'error');
+                        }
+                    });
+                }
+                appendToTerminal('Error creating file: ' + res.error, 'error');
+            } else {
+                appendToTerminal(res.message || `File created: ${path}`, 'out');
+            }
+            loadFileTree();
+        })
+        .catch(err => {
+            appendToTerminal('Error creating file: ' + err, 'error');
+            console.error("Error creating file:", err);
+        })
+        .finally(hideContextMenu);
+    };
+
+    // If we don't have a token, get it first
+    if (!window.podToken) {
+        updatePodTokens().then(() => makeRequest());
+    } else {
+        makeRequest();
+    }
 };
+
 window.createNewFolder=function(){
-    const name=prompt('Enter folder name:');if(!name)return hideContextMenu();
-    const base=contextMenuTarget?.dataset.path??'';const path=base?`${base}/${name}`:name;
+    const name=prompt('Enter folder name:');
+    if(!name)return hideContextMenu();
+    
+    // Use the contextMenuPath to determine where to create the folder
+    let path = contextMenuPath ? `${contextMenuPath}/${name}` : name;
     
     // Create request data with path and optional project_id or conversation_id
-    const requestData = { path };
+    const requestData = {
+        path,
+        type: 'directory'
+    };
     if (window.projectId) requestData.project_id = window.projectId;
     if (window.conversationId) requestData.conversation_id = window.conversationId;
+    if (window.podToken) requestData.token = window.podToken;
 
-    fetch('/coding/k8s/create_folder/', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(requestData)
-    })
-    .then(r=>r.json())
-    .then(res=>{
-        res.error ? appendToTerminal('Error creating folder: '+res.error,'error')
-                  : appendToTerminal('Folder created: '+path,'out');
-        loadFileTree();
-    })
-    .catch(err=>appendToTerminal('Error creating folder: '+err,'error'))
-    .finally(hideContextMenu);
+    // Function to make the actual request
+    const makeRequest = () => {
+        fetch('/coding/k8s/create_item/', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(requestData)
+        })
+        .then(r => r.json())
+        .then(res => {
+            if (res.error) {
+                // If we get a token error, try refreshing the token and retry
+                if (res.error.includes('token') && !requestData.retried) {
+                    console.log('Token error, refreshing tokens and retrying...');
+                    return updatePodTokens().then(tokens => {
+                        if (tokens && tokens.podToken) {
+                            requestData.token = tokens.podToken;
+                            requestData.retried = true;
+                            return makeRequest();
+                        } else {
+                            appendToTerminal('Error creating folder: Invalid token', 'error');
+                        }
+                    });
+                }
+                
+                // Check if the folder might already exist (even though backend should handle this now)
+                if (res.error.includes('409') || res.error.includes('already exists')) {
+                    appendToTerminal(`Folder already exists: ${path}`, 'out');
+                    // Force a full refresh of the file tree after a delay
+                    setTimeout(() => loadFileTree(true), 500);
+                    return;
+                }
+                
+                appendToTerminal('Error creating folder: ' + res.error, 'error');
+            } else {
+                // Check if the message indicates the folder already exists
+                if (res.message && res.message.includes('already exists')) {
+                    appendToTerminal(res.message, 'out');
+                    
+                    // FALLBACK: If API says it exists but we can't see it,
+                    // force directory creation with mkdir command
+                    const cmdRequestData = {
+                        command: `mkdir -p /workspace/${path}`,
+                        project_id: window.projectId,
+                        conversation_id: window.conversationId
+                    };
+                    
+                    fetch('/coding/k8s/execute_command/', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(cmdRequestData)
+                    })
+                    .then(cr => cr.json())
+                    .then(cmdRes => {
+                        if (cmdRes.error) {
+                            appendToTerminal(`Error creating directory via command: ${cmdRes.error}`, 'error');
+                        } else {
+                            appendToTerminal(`Fallback mkdir command executed for: ${path}`, 'out');
+                            if (cmdRes.stderr) {
+                                appendToTerminal(cmdRes.stderr, 'error');
+                            }
+                        }
+                        // Force file tree refresh after terminal command
+                        setTimeout(() => {
+                            loadFileTree(true);
+                            // Also use terminal check as extra fallback
+                            checkForFilesInTerminal();
+                        }, 500);
+                    })
+                    .catch(cmdErr => {
+                        appendToTerminal(`Command execution error: ${cmdErr}`, 'error');
+                        setTimeout(() => loadFileTree(true), 500);
+                    });
+                    
+                    return;
+                } else {
+                    appendToTerminal(res.message || `Folder created: ${path}`, 'out');
+                }
+                // Force a full refresh of the file tree after a delay
+                setTimeout(() => loadFileTree(true), 500);
+                return;
+            }
+            loadFileTree();
+        })
+        .catch(err => {
+            appendToTerminal('Error creating folder: ' + err, 'error');
+            console.error("Error creating folder:", err);
+        })
+        .finally(hideContextMenu);
+    };
+
+    // If we don't have a token, get it first
+    if (!window.podToken) {
+        updatePodTokens().then(() => makeRequest());
+    } else {
+        makeRequest();
+    }
 };
+
 window.renameItem=function(){
     if(!contextMenuTarget)return hideContextMenu();
     const old=contextMenuTarget.dataset.path;
@@ -1604,6 +1843,7 @@ window.renameItem=function(){
     .catch(err=>appendToTerminal('Error renaming item: '+err,'error'))
     .finally(hideContextMenu);
 };
+
 window.deleteItem=function(){
     if(!contextMenuTarget)return hideContextMenu();
     const path=contextMenuTarget.dataset.path;

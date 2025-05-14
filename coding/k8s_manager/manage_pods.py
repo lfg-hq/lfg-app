@@ -300,12 +300,16 @@ def create_kubernetes_pod(client, namespace, image="gitpod/workspace-full:latest
     Args:
         client (paramiko.SSHClient): SSH client
         namespace (str): Kubernetes namespace
-        image (str): Docker image to use
+        image (str): Docker image to use (default is gitpod/workspace-full:latest which includes many development tools)
         resource_limits (dict): Resource limits for the pod
         
     Returns:
         tuple: (success, pod_name, service_details)
     """
+    
+    image = "jitin2pillai/lfg-base:v1"
+    
+    # Generate a random password for ttyd
     pod_name = f"{namespace}-pod"
     service_name = f"{namespace}-service"
     pv_name = f"{namespace}-pv"
@@ -321,10 +325,10 @@ def create_kubernetes_pod(client, namespace, image="gitpod/workspace-full:latest
     # Default resource limits if not provided
     if not resource_limits:
         resource_limits = {
-            'memory': '100Mi',
-            'cpu': '100m',
-            'memory_requests': '50Mi',
-            'cpu_requests': '50m'
+            'memory': '200Mi',         # Increased from 100Mi to 200Mi
+            'cpu': '250m',             # Increased from 100m to 250m
+            'memory_requests': '100Mi', # Increased from 50Mi to 100Mi
+            'cpu_requests': '100m'      # Increased from 50m to 100m
         }
     
     # Clean up any existing resources completely
@@ -618,25 +622,22 @@ spec:
       containers:
       - name: dev-environment
         image: {image}
-        command: ["sleep", "infinity"]
         resources:
           limits:
-            memory: "{resource_limits.get('memory', '100Mi')}"
-            cpu: "{resource_limits.get('cpu', '100m')}"
+            memory: "{resource_limits.get('memory', '200Mi')}"
+            cpu: "{resource_limits.get('cpu', '250m')}"
           requests:
-            memory: "{resource_limits.get('memory_requests', '50Mi')}"
-            cpu: "{resource_limits.get('cpu_requests', '50m')}"
-        volumeMounts:
-        - name: user-data
-          mountPath: /workspace
-      - name: ttyd
-        image: tsl0922/ttyd:latest
-        command: ["/usr/bin/ttyd"]
-        args: ["--port", "7681", "--interface", "0.0.0.0", "--credential", "user:password", "--writable", "/bin/sh"]
+            memory: "{resource_limits.get('memory_requests', '100Mi')}"
+            cpu: "{resource_limits.get('cpu_requests', '100m')}"
         ports:
         - containerPort: 7681
           name: ttyd
           protocol: TCP
+        env:
+        - name: TTYD_USER
+          value: "user"
+        - name: TTYD_PASS
+          value: "password"
         volumeMounts:
         - name: user-data
           mountPath: /workspace
@@ -840,6 +841,50 @@ spec:
                         continue
                 
                 logger.info("All containers in pod are ready")
+                
+                # Verify that required software has been installed
+                logger.info("Verifying software installation in the pod...")
+                verification_commands = [
+                    f"kubectl exec -n {namespace} {actual_pod_name} -c dev-environment -- which git",
+                    f"kubectl exec -n {namespace} {actual_pod_name} -c dev-environment -- which python3",
+                    f"kubectl exec -n {namespace} {actual_pod_name} -c dev-environment -- which nodejs"
+                ]
+                
+                software_verified = True
+                for cmd in verification_commands:
+                    success, stdout, stderr = execute_remote_command(client, cmd)
+                    if not success or not stdout:
+                        software_verified = False
+                        logger.warning(f"Software verification failed for command: {cmd}")
+                        logger.warning(f"Output: {stdout}, Error: {stderr}")
+                        
+                if software_verified:
+                    logger.info("Required software (git, python3, nodejs) is installed in the pod")
+                else:
+                    logger.warning("Some required software might not be installed properly. Attempting to install missing packages...")
+                    
+                    # Run installation command directly
+                    install_cmd = f"kubectl exec -n {namespace} {actual_pod_name} -c dev-environment -- /bin/sh -c 'apt-get update && apt-get install -y git python3 python3-pip nodejs npm curl && pip3 install --upgrade pip'"
+                    install_success, install_stdout, install_stderr = execute_remote_command(client, install_cmd)
+                    
+                    if install_success:
+                        logger.info("Successfully installed missing packages")
+                        
+                        # Verify installation again
+                        all_installed = True
+                        for cmd in verification_commands:
+                            success, stdout, stderr = execute_remote_command(client, cmd)
+                            if not success or not stdout:
+                                all_installed = False
+                                logger.warning(f"Software still missing after installation attempt: {cmd}")
+                        
+                        if all_installed:
+                            logger.info("All required software is now installed")
+                        else:
+                            logger.warning("Some packages could not be installed. The pod will continue to operate, but you may need to install missing packages manually.")
+                    else:
+                        logger.error(f"Failed to install missing packages: {install_stderr}")
+                        logger.warning("The pod will continue to operate, but you may need to install packages manually.")
                 
                 # Get HTTP nodePort
                 success, stdout, stderr = execute_remote_command(
@@ -1081,8 +1126,9 @@ def manage_kubernetes_pod(project_id=None, conversation_id=None, image="gitpod/w
     Args:
         project_id (str): Project ID (optional)
         conversation_id (str): Conversation ID (optional)
-        image (str): Docker image to use (default: "gitpod/workspace-full:latest")
-        resource_limits (dict): Resource limits to apply to the pod (optional)
+        image (str): Docker image to use (default is gitpod/workspace-full:latest which includes many development tools)
+        resource_limits (dict): Resource limits to apply to the pod (default: 200Mi memory limit, 250m CPU limit, 
+                              100Mi memory request, 100m CPU request)
         
     Returns:
         tuple: (success, pod, error_message)

@@ -429,6 +429,10 @@ def get_k8s_file_tree(request):
         project_id = data.get('project_id')
         conversation_id = data.get('conversation_id')
         directory = data.get('directory', '')  # Default to root directory (empty string)
+        force_refresh = data.get('force_refresh', False)  # Whether to force a direct check
+        
+        # Log the request
+        logger.info(f"get_k8s_file_tree request: project_id={project_id}, conversation_id={conversation_id}, directory={directory}, force_refresh={force_refresh}")
         
         # Validate input
         if not (project_id or conversation_id):
@@ -721,6 +725,8 @@ def get_k8s_file_content(request):
     
     return JsonResponse({'error': 'POST request expected'}, status=400)
 
+
+
 @csrf_exempt
 def save_k8s_file(request):
     """
@@ -994,6 +1000,41 @@ def k8s_create_folder(request):
                 data=dir_data
             )
             
+            # If the API reports the directory already exists, try a direct mkdir command as fallback
+            if not success and ("409 Conflict" in error_message or "already exists" in error_message):
+                logger.info(f"Directory '{abs_path}' already exists according to API, trying direct command fallback")
+                
+                # Try a direct command to ensure the directory exists
+                try:
+                    # Use execute_command_in_pod to run mkdir
+                    cmd_success, cmd_stdout, cmd_stderr = execute_command_in_pod(
+                        project_id=project_id,
+                        conversation_id=conversation_id,
+                        command=f"mkdir -p /workspace/{abs_path}"
+                    )
+                    
+                    if cmd_success:
+                        # Command succeeded - directory should now exist
+                        logger.info(f"Successfully created directory via direct command: {abs_path}")
+                        return JsonResponse({
+                            'status': 'success',
+                            'message': f'Directory created via command: {folder_path}',
+                            'filebrowser_url': filebrowser_url,
+                            'note': 'Used command fallback since API reported directory already exists'
+                        })
+                    else:
+                        # Command failed
+                        logger.warning(f"Command fallback also failed: {cmd_stderr}")
+                except Exception as cmd_error:
+                    logger.exception(f"Error in command fallback: {str(cmd_error)}")
+                
+                # Even if command fallback fails, still return success since FileBrowser thinks it exists
+                return JsonResponse({
+                    'status': 'success',
+                    'message': f'Directory already exists: {folder_path}',
+                    'filebrowser_url': filebrowser_url
+                })
+            
             if not success:
                 return JsonResponse({
                     'error': f'Failed to create directory: {error_message}',
@@ -1006,6 +1047,7 @@ def k8s_create_folder(request):
             
             return JsonResponse({
                 'status': 'success',
+                'message': f'Directory created: {folder_path}',
                 'filebrowser_url': filebrowser_url
             })
         except Exception as e:
@@ -1935,21 +1977,291 @@ def filebrowser_api_request__(filebrowser_url, method, endpoint, data=None, file
             if not response.content:
                 logger.debug("Empty response content")
                 return True, {}, None
-                
-            try:
-                response_data = response.json()
-                logger.debug(f"Received JSON response: {response_data}")
-                return True, response_data, None
-            except ValueError:
+            
+            # Check if response is JSON
+            content_type = response.headers.get('content-type', '')
+            if 'application/json' in content_type:
+                try:
+                    response_data = response.json()
+                    logger.debug(f"Received JSON response: {response_data}")
+                    return True, response_data, None
+                except ValueError:
+                    # JSON parsing failed, return raw content
+                    logger.debug(f"Failed to parse JSON, returning raw content: {len(response.content)} bytes")
+                    return True, response.content, None
+            else:
                 # For non-JSON responses (like raw file content)
-                logger.debug(f"Received non-JSON response: {len(response.content)} bytes")
+                logger.debug(f"Received non-JSON response ({content_type}): {len(response.content)} bytes")
                 return True, response.content, None
         else:
             error_msg = f"FileBrowser API error: {response.status_code} - {response.text}"
             logger.error(error_msg)
-            return False, None, error_msg
+            # Include status code in the error message for better error handling
+            return False, None, f"{response.status_code} {response.reason}: {response.text}"
             
     except RequestException as e:
         error_msg = f"Error connecting to FileBrowser API: {str(e)}"
         logger.error(error_msg)
         return False, None, error_msg
+
+@csrf_exempt
+def k8s_create_item(request):
+    """
+    API endpoint to create either a file or folder in a Kubernetes pod via the FileBrowser API
+    """
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        project_id = data.get('project_id')
+        conversation_id = data.get('conversation_id')
+        path = data.get('path')
+        item_type = data.get('type', 'file')  # 'file' or 'directory'
+        content = data.get('content', '')  # Only used for files
+        
+        # Validate input
+        if not (project_id or conversation_id):
+            return JsonResponse({'error': 'Either project_id or conversation_id must be provided'}, status=400)
+        
+        if not path:
+            return JsonResponse({'error': 'Path must be provided'}, status=400)
+        
+        try:
+            # Ensure the pod is running
+            query = Q()
+            if project_id:
+                query &= Q(project_id=str(project_id))
+            elif conversation_id:
+                query &= Q(conversation_id=str(conversation_id))
+            
+            pod = KubernetesPod.objects.filter(query).first()
+            
+            if not pod or pod.status != 'running':
+                # Try to create/start the pod if it doesn't exist or isn't running
+                success, pod, error_message = manage_kubernetes_pod(
+                    project_id=project_id,
+                    conversation_id=conversation_id
+                )
+                
+                if not success or not pod:
+                    return JsonResponse({
+                        'error': 'Failed to start Kubernetes pod',
+                        'debug_info': {
+                            'project_id': project_id,
+                            'conversation_id': conversation_id,
+                            'pod_exists': pod is not None,
+                            'error_message': error_message
+                        }
+                    }, status=500)
+            
+            # Get the filebrowser URL
+            filebrowser_url = None
+            if pod.service_details and 'filebrowserUrl' in pod.service_details:
+                filebrowser_url = pod.service_details.get('filebrowserUrl')
+            else:
+                # If filebrowserUrl is not directly available, try to construct it
+                if pod.service_details:
+                    filebrowser_port = pod.service_details.get('filebrowserPort')
+                    node_ip = pod.service_details.get('nodeIP')
+                    
+                    if filebrowser_port and node_ip:
+                        # Construct filebrowser URL
+                        filebrowser_url = f"http://{node_ip}:{filebrowser_port}"
+                        
+                        # Update the pod record for future requests
+                        pod.service_details['filebrowserUrl'] = filebrowser_url
+                        pod.save(update_fields=['service_details'])
+                        
+                        logger.info(f"Created and saved missing filebrowserUrl: {filebrowser_url}")
+            
+            if not filebrowser_url:
+                return JsonResponse({
+                    'error': 'FileBrowser URL not available',
+                    'debug_info': {
+                        'pod_name': pod.pod_name,
+                        'namespace': pod.namespace,
+                        'service_details': pod.service_details
+                    }
+                }, status=400)
+            
+            # Process the path
+            abs_path = path
+            if abs_path.startswith('/'):
+                abs_path = abs_path[1:]  # Remove leading slash
+            
+            if item_type == 'directory':
+                # Create a directory
+                dir_data = {
+                    "item": {
+                        "path": abs_path,
+                        "type": "directory"
+                    }
+                }
+                
+                # Make API request to create the directory
+                success, response_data, error_message = filebrowser_api_request(
+                    filebrowser_url=filebrowser_url,
+                    method="POST",
+                    endpoint="/api/resources",
+                    data=dir_data
+                )
+                
+                # If the API reports the directory already exists, try a direct mkdir command as fallback
+                if not success and ("409 Conflict" in error_message or "already exists" in error_message):
+                    logger.info(f"Directory '{abs_path}' already exists according to API, trying direct command fallback")
+                    
+                    # Try a direct command to ensure the directory exists
+                    try:
+                        # Use execute_command_in_pod to run mkdir
+                        cmd_success, cmd_stdout, cmd_stderr = execute_command_in_pod(
+                            project_id=project_id,
+                            conversation_id=conversation_id,
+                            command=f"mkdir -p /workspace/{abs_path}"
+                        )
+                        
+                        if cmd_success:
+                            # Command succeeded - directory should now exist
+                            logger.info(f"Successfully created directory via direct command: {abs_path}")
+                            return JsonResponse({
+                                'status': 'success',
+                                'message': f'Directory created via command: {path}',
+                                'filebrowser_url': filebrowser_url,
+                                'note': 'Used command fallback since API reported directory already exists'
+                            })
+                        else:
+                            # Command failed
+                            logger.warning(f"Command fallback also failed: {cmd_stderr}")
+                    except Exception as cmd_error:
+                        logger.exception(f"Error in command fallback: {str(cmd_error)}")
+                    
+                    # Even if command fallback fails, still return success since FileBrowser thinks it exists
+                    logger.info(f"Directory '{abs_path}' already exists, continuing as normal")
+                    return JsonResponse({
+                        'status': 'success',
+                        'message': f'Directory already exists: {path}',
+                        'filebrowser_url': filebrowser_url
+                    })
+                
+                if not success:
+                    # Check if this is a 409 Conflict error (directory already exists)
+                    # This is actually not an error for our purposes
+                    if "409 Conflict" in error_message or "already exists" in error_message:
+                        logger.info(f"Directory '{abs_path}' already exists, continuing as normal")
+                        return JsonResponse({
+                            'status': 'success',
+                            'message': f'Directory already exists: {path}',
+                            'filebrowser_url': filebrowser_url
+                        })
+                    
+                    return JsonResponse({
+                        'error': f'Failed to create directory: {error_message}',
+                        'debug_info': {
+                            'api_endpoint': "/api/resources",
+                            'filebrowser_url': filebrowser_url,
+                            'dir_data': dir_data
+                        }
+                    }, status=500)
+                
+                return JsonResponse({
+                    'status': 'success',
+                    'message': f'Directory created: {path}',
+                    'filebrowser_url': filebrowser_url
+                })
+            
+            else:  # File creation
+                # First, ensure parent directory exists
+                dir_path = os.path.dirname(abs_path)
+                if dir_path:  # Skip if it's in the root
+                    parent_dirs = dir_path.split('/')
+                    current_path = ""
+                    
+                    for dir_name in parent_dirs:
+                        if current_path:
+                            current_path = f"{current_path}/{dir_name}"
+                        else:
+                            current_path = dir_name
+                        
+                        # Create directory data
+                        dir_data = {
+                            "item": {
+                                "path": current_path,
+                                "type": "directory"
+                            }
+                        }
+                        
+                        # Try to create the directory
+                        create_success, _, create_error = filebrowser_api_request(
+                            filebrowser_url=filebrowser_url,
+                            method="POST",
+                            endpoint="/api/resources",
+                            data=dir_data
+                        )
+                        
+                        # If it failed for a reason other than "already exists", log a warning
+                        if not create_success:
+                            if "409 Conflict" in create_error or "already exists" in create_error:
+                                logger.info(f"Parent directory '{current_path}' already exists, continuing")
+                            else:
+                                logger.warning(f"Failed to create directory {current_path}: {create_error}")
+                            # Continue anyway as the directory might already exist
+                
+                # URL encode the file path
+                encoded_file_path = quote(abs_path, safe='')
+                
+                # Prepare file content
+                file_content = content.encode('utf-8')  # Encode the content as bytes
+                
+                # Upload the file using the raw endpoint
+                raw_endpoint = f"/api/raw/{encoded_file_path}"
+                
+                success, response_data, error_message = filebrowser_api_request(
+                    filebrowser_url=filebrowser_url,
+                    method="POST",
+                    endpoint=raw_endpoint,
+                    data=file_content,
+                    params={"override": "true"}  # Override existing file
+                )
+                
+                if not success:
+                    logger.warning(f"Raw endpoint upload failed: {error_message}. Trying multipart...")
+                    
+                    # Try using a multipart/form-data approach as fallback
+                    import io
+                    file_name = os.path.basename(abs_path)
+                    file_obj = io.BytesIO(file_content)
+                    
+                    files = {
+                        'file': (file_name, file_obj, 'application/octet-stream')
+                    }
+                    
+                    resources_endpoint = f"/api/resources/{encoded_file_path}"
+                    fallback_success, fallback_response, fallback_error = filebrowser_api_request(
+                        filebrowser_url=filebrowser_url,
+                        method="POST",
+                        endpoint=resources_endpoint,
+                        files=files,
+                        params={"override": "true"}
+                    )
+                    
+                    if not fallback_success:
+                        return JsonResponse({
+                            'error': f'Failed to create file: {error_message}. Fallback also failed: {fallback_error}',
+                            'debug_info': {
+                                'raw_endpoint': raw_endpoint,
+                                'resources_endpoint': resources_endpoint,
+                                'filebrowser_url': filebrowser_url
+                            }
+                        }, status=500)
+                    else:
+                        logger.info("Fallback multipart upload succeeded")
+                        success = True
+                
+                return JsonResponse({
+                    'status': 'success',
+                    'message': f'File created: {path}',
+                    'filebrowser_url': filebrowser_url
+                })
+        
+        except Exception as e:
+            logger.exception(f"Error in k8s_create_item: {str(e)}")
+            return JsonResponse({'error': str(e)}, status=500)
+    
+    return JsonResponse({'error': 'POST request expected'}, status=400)
