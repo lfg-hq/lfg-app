@@ -38,6 +38,134 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
 #h-resizer{height:5px;width:100%;background:#1e1e1e;cursor:row-resize;transition:background .2s}
 #h-resizer:hover,#h-resizer.dragging{background:#0e639c}
 
+/* Tab bar styles */
+#editor-tabs {
+    display: flex;
+    background: #252526;
+    border-bottom: 1px solid #333;
+    overflow-x: auto;
+    user-select: none;
+    height: 35px;
+    flex-shrink: 0;
+    scrollbar-width: thin;
+}
+
+.editor-tab {
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    height: 35px;
+    background: #2d2d2d;
+    border-right: 1px solid #1e1e1e;
+    font-size: 12px;
+    color: #ccc;
+    cursor: pointer;
+    white-space: nowrap;
+    position: relative;
+    min-width: 100px;
+    max-width: 200px;
+}
+
+.editor-tab.active {
+    background: #1e1e1e;
+    color: #fff;
+    border-top: 1px solid #0e639c;
+    margin-top: -1px;
+}
+
+.editor-tab:hover {
+    background: #333;
+}
+
+.editor-tab .tab-icon {
+    margin-right: 6px;
+    font-size: 14px;
+    color: #ccc;
+}
+
+.editor-tab .tab-name {
+    flex-grow: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 150px;
+}
+
+.editor-tab .tab-close {
+    margin-left: 6px;
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    font-size: 14px;
+    visibility: hidden;
+}
+
+.editor-tab:hover .tab-close {
+    visibility: visible;
+}
+
+.editor-tab .tab-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.editor-tab .tab-close:active {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.editor-tab.unsaved .tab-close::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #0e639c;
+    position: absolute;
+    top: 8px;
+    right: 8px;
+}
+
+/* Loading spinner for tabs */
+.loading-spinner {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: #0e639c;
+    animation: tab-spin 1s linear infinite;
+    margin-right: 5px;
+}
+
+@keyframes tab-spin {
+    to { transform: rotate(360deg); }
+}
+
+.tab-add-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 35px;
+    height: 35px;
+    background: transparent;
+    color: #ccc;
+    cursor: pointer;
+    font-size: 18px;
+    border: none;
+}
+
+.tab-add-button:hover {
+    background: #333;
+}
+
+/* Editor wrapper */
+#editor-wrapper {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+}
+
 /* Terminal WebSocket Styles */
 
 /* Terminal container enhancements */
@@ -287,7 +415,15 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
 
     <!-- Editor + horizontal resizer + terminal -->
     <div id="editor-container">
-        <div id="monaco-editor"></div>
+        <div id="editor-wrapper">
+            <div id="editor-tabs">
+                <!-- Tabs will be added dynamically via JavaScript -->
+                <button class="tab-add-button" id="add-new-tab" title="New File">
+                    <i class="mdi mdi-plus"></i>
+                </button>
+            </div>
+            <div id="monaco-editor"></div>
+        </div>
         <div id="h-resizer"></div>
         
         <!-- Terminal Container -->
@@ -515,6 +651,8 @@ window.editor = editor;
 window.currentFile = '';
 window.activeItem = null;
 window.currentFileSource = 'kubernetes';
+window.openTabs = []; // Array to store open tabs
+window.activeTabIndex = -1; // Index of the active tab
 
 // Set up auto-save in Monaco
 let saveTimeout;
@@ -522,16 +660,461 @@ editor.onDidChangeModelContent(()=>{
     if(!window.currentFile)return;
     clearTimeout(saveTimeout);
     saveTimeout=setTimeout(window.saveFile,1000);
+    
+    // Mark the current tab as unsaved
+    const tabIndex = findTabByPath(window.currentFile);
+    if (tabIndex !== -1) {
+        const tab = document.querySelector(`.editor-tab[data-index="${tabIndex}"]`);
+        if (tab) tab.classList.add('unsaved');
+    }
 });
 
 // Add keyboard shortcuts
 editor.addCommand(monaco.KeyMod.CtrlCmd|monaco.KeyCode.KeyS, window.saveFile);
 
+// Add keyboard shortcut for switching tabs
+editor.addCommand(monaco.KeyMod.CtrlCmd|monaco.KeyCode.Tab, () => {
+    if (window.openTabs.length <= 1) return;
+    const nextIndex = (window.activeTabIndex + 1) % window.openTabs.length;
+    switchToTab(nextIndex);
+});
+
+// Add keyboard shortcut for closing tabs
+editor.addCommand(monaco.KeyMod.CtrlCmd|monaco.KeyMod.Shift|monaco.KeyCode.KeyW, () => {
+    if (window.activeTabIndex !== -1) {
+        closeTab(window.activeTabIndex);
+    }
+});
+
+// Add keyboard shortcut for creating a new tab
+editor.addCommand(monaco.KeyMod.CtrlCmd|monaco.KeyCode.KeyN, () => {
+    createNewTab('Untitled', '', 'plaintext');
+    return false; // Prevent default browser behavior
+});
+
 /*─────────────────────────────────────────────────────────────
   Initial load
 ─────────────────────────────────────────────────────────────*/
 console.log("Monaco initialized");
+
+// Initialize the tabs UI
+initTabsUI();
+
 });/* end require */
+
+/*─────────────────────────────────────────────────────────────
+  Tabs Management Functions
+─────────────────────────────────────────────────────────────*/
+function initTabsUI() {
+    // Set up the "New Tab" button
+    const addTabButton = document.getElementById('add-new-tab');
+    if (addTabButton) {
+        addTabButton.addEventListener('click', () => {
+            createNewTab('Untitled', '', 'plaintext');
+        });
+    }
+}
+
+// Function to create a new tab
+function createNewTab(name, path, language, content = '') {
+    // Check if the tab already exists
+    const existingTabIndex = findTabByPath(path);
+    if (existingTabIndex !== -1) {
+        // If it exists, just switch to it
+        switchToTab(existingTabIndex);
+        return;
+    }
+    
+    // Create a new tab object
+    const newTab = {
+        name: name,
+        path: path,
+        language: language,
+        content: content
+    };
+    
+    // Add to our tabs array
+    window.openTabs.push(newTab);
+    const tabIndex = window.openTabs.length - 1;
+    
+    // Create the tab UI element
+    const tabsContainer = document.getElementById('editor-tabs');
+    const tabElement = document.createElement('div');
+    tabElement.className = 'editor-tab';
+    tabElement.setAttribute('data-index', tabIndex);
+    tabElement.setAttribute('data-path', path);
+    
+    // Determine icon based on file extension
+    let iconClass = 'mdi-file-document-outline';
+    if (path) {
+        const ext = path.split('.').pop().toLowerCase();
+        const fileIcon = getFileIcon(name);
+        iconClass = `mdi-${fileIcon}`;
+    }
+    
+    tabElement.innerHTML = `
+        <span class="tab-icon"><i class="mdi ${iconClass}"></i></span>
+        <span class="tab-name">${name}</span>
+        <span class="tab-close"><i class="mdi mdi-close"></i></span>
+    `;
+    
+    // Add click handler to switch to this tab
+    tabElement.addEventListener('click', (e) => {
+        // If not clicking the close button
+        if (!e.target.closest('.tab-close')) {
+            switchToTab(tabIndex);
+        }
+    });
+    
+    // Add close button handler
+    const closeButton = tabElement.querySelector('.tab-close');
+    closeButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeTab(tabIndex);
+    });
+    
+    // Insert the tab before the add button
+    tabsContainer.insertBefore(tabElement, document.getElementById('add-new-tab'));
+    
+    // Switch to the new tab
+    switchToTab(tabIndex);
+    
+    return tabIndex;
+}
+
+// Function to switch to a tab
+function switchToTab(index) {
+    if (index < 0 || index >= window.openTabs.length) return;
+    
+    // If we're already on this tab, do nothing
+    if (index === window.activeTabIndex) return;
+    
+    // Remove active class from all tabs
+    document.querySelectorAll('.editor-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // Add active class to the selected tab
+    const tabElement = document.querySelector(`.editor-tab[data-index="${index}"]`);
+    if (tabElement) {
+        tabElement.classList.add('active');
+        
+        // Ensure the tab is visible by scrolling if needed
+        tabElement.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+    
+    // Update the active tab index
+    window.activeTabIndex = index;
+    
+    // Get the tab data
+    const tab = window.openTabs[index];
+    if (!tab) {
+        console.error(`Tab at index ${index} not found`);
+        return;
+    }
+    
+    // Update the editor content
+    if (tab.path) {
+        // If it's a real file, update the current file and load it
+        window.currentFile = tab.path;
+        
+        // If we already have content cached, use it
+        if (tab.model) {
+            try {
+                window.editor.setModel(tab.model);
+            } catch (e) {
+                console.error("Error setting editor model:", e);
+                // If there was an error with the model, try to load the file again
+                delete tab.model;
+                loadFileContent(tab.path);
+            }
+        } else {
+            // Otherwise, load the file from the server
+            const fileItem = document.querySelector(`.file-item[data-path="${tab.path}"]`);
+            if (fileItem) {
+                // Update the active item in the file tree
+                if (window.activeItem) window.activeItem.classList.remove('active');
+                fileItem.classList.add('active');
+                window.activeItem = fileItem;
+            }
+            
+            // Load the file content
+            loadFileContent(tab.path);
+        }
+    } else {
+        // For new untitled files, create a new model
+        const uri = monaco.Uri.parse(`untitled:${index}`);
+        let model = monaco.editor.getModel(uri);
+        
+        try {
+            if (!model) {
+                model = monaco.editor.createModel(tab.content || '', tab.language, uri);
+                tab.model = model;
+            }
+            
+            window.editor.setModel(model);
+            window.currentFile = '';
+        } catch (e) {
+            console.error("Error creating or setting model for untitled file:", e);
+            // Create a new model as fallback
+            try {
+                const fallbackModel = monaco.editor.createModel('', 'plaintext');
+                window.editor.setModel(fallbackModel);
+            } catch (e2) {
+                console.error("Error creating fallback model:", e2);
+            }
+        }
+    }
+}
+
+// Function to close a tab
+function closeTab(index) {
+    if (index < 0 || index >= window.openTabs.length) return;
+    
+    const tab = window.openTabs[index];
+    
+    // Check if the tab has unsaved changes
+    const tabElement = document.querySelector(`.editor-tab[data-index="${index}"]`);
+    if (tabElement && tabElement.classList.contains('unsaved')) {
+        if (!confirm(`The file "${tab.name}" has unsaved changes. Do you want to close it anyway?`)) {
+            return;
+        }
+    }
+    
+    // Store the current file path and active tab before removal
+    const wasActiveTab = (index === window.activeTabIndex);
+    const filePath = tab.path;
+    
+    // Remove the tab from the DOM
+    if (tabElement) {
+        tabElement.remove();
+    }
+    
+    // Dispose of the model if it exists
+    if (tab.model) {
+        try {
+            tab.model.dispose();
+        } catch (e) {
+            console.error("Error disposing model:", e);
+        }
+    }
+    
+    // Remove the tab from our array
+    window.openTabs.splice(index, 1);
+    
+    // Update data-index attributes for all tabs after this one
+    document.querySelectorAll('.editor-tab').forEach(tab => {
+        const tabIndex = parseInt(tab.getAttribute('data-index'));
+        if (tabIndex > index) {
+            tab.setAttribute('data-index', tabIndex - 1);
+        }
+    });
+    
+    // If we closed the active tab
+    if (wasActiveTab) {
+        // If there are still tabs open, switch to the next one or the previous one
+        if (window.openTabs.length > 0) {
+            const newIndex = Math.min(index, window.openTabs.length - 1);
+            window.activeTabIndex = -1; // Reset active tab index to force a full switch
+            switchToTab(newIndex);
+        } else {
+            // No tabs left, clear the editor
+            window.editor.setModel(monaco.editor.createModel('', 'plaintext'));
+            window.currentFile = '';
+            window.activeTabIndex = -1;
+            if (window.activeItem) {
+                window.activeItem.classList.remove('active');
+                window.activeItem = null;
+            }
+        }
+    } else if (index < window.activeTabIndex) {
+        // If we closed a tab before the active one, adjust the active index
+        window.activeTabIndex--;
+    }
+    
+    // If this was a file tab and it was the active file in the file explorer, deselect it
+    if (filePath && filePath === window.currentFile) {
+        window.currentFile = '';
+        if (window.activeItem) {
+            window.activeItem.classList.remove('active');
+            window.activeItem = null;
+        }
+    }
+}
+
+// Helper function to find a tab by path
+function findTabByPath(path) {
+    if (!path) return -1;
+    return window.openTabs.findIndex(tab => tab.path === path);
+}
+
+// Function to load file content (extracted from openFile)
+function loadFileContent(path) {
+    // Create request data
+    const requestData = { path };
+    if (window.projectId) requestData.project_id = window.projectId;
+    if (window.conversationId) requestData.conversation_id = window.conversationId;
+    if (window.podToken) requestData.token = window.podToken;
+
+    // Find the tab for this file
+    const tabIndex = findTabByPath(path);
+    if (tabIndex === -1) return; // Tab doesn't exist anymore
+    
+    // Get the tab element and add a loading indicator class
+    const tabElement = document.querySelector(`.editor-tab[data-index="${tabIndex}"]`);
+    if (tabElement) {
+        tabElement.classList.add('loading');
+        // Add a small loading indicator to the tab
+        const tabName = tabElement.querySelector('.tab-name');
+        if (tabName) {
+            tabName.dataset.originalText = tabName.textContent;
+            tabName.innerHTML = `<span class="loading-spinner"></span> ${tabName.textContent}`;
+        }
+    }
+
+    // Function to make the actual request
+    const makeRequest = () => {
+        fetch('/coding/k8s/get_file_content/', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(requestData)
+        })
+        .then(r => {
+            console.log(`File content response status: ${r.status}`);
+            return r.json();
+        })
+        .then(data => {
+            console.log(`File content response:`, data);
+            
+            // Remove loading indicator
+            if (tabElement) {
+                tabElement.classList.remove('loading');
+                const tabName = tabElement.querySelector('.tab-name');
+                if (tabName && tabName.dataset.originalText) {
+                    tabName.textContent = tabName.dataset.originalText;
+                    delete tabName.dataset.originalText;
+                }
+            }
+            
+            if (data.error) {
+                // If we get a token error, try refreshing the token and retry
+                if (data.error.includes('token') && !requestData.retried) {
+                    console.log('Token error, refreshing tokens and retrying...');
+                    return updatePodTokens().then(tokens => {
+                        if (tokens && tokens.podToken) {
+                            requestData.token = tokens.podToken;
+                            requestData.retried = true;
+                            return makeRequest();
+                        } else {
+                            appendToTerminal('Error opening file: Invalid token', 'error');
+                        }
+                    });
+                }
+                appendToTerminal('Error opening file: ' + data.error, 'error');
+                return;
+            }
+            
+            // Determine file extension and language
+            const ext = path.split('.').pop();
+            const lang = monaco.languages.getLanguages().find(l => l.extensions?.includes('.'+ext))?.id || 'plaintext';
+            
+            // Handle different content types properly
+            let contentStr = '';
+            
+            if (data.content === null || data.content === undefined) {
+                // Handle null/undefined content
+                contentStr = '';
+                console.log("Content is null or undefined, using empty string");
+            } else if (typeof data.content === 'string') {
+                // Handle string content directly
+                contentStr = data.content;
+                console.log("Content is string type, using as-is");
+            } else if (typeof data.content === 'object') {
+                // Handle object content (likely empty object)
+                try {
+                    contentStr = JSON.stringify(data.content);
+                    console.log("Content is object type, stringified to:", contentStr);
+                    
+                    // If it's an empty object {}, just use empty string
+                    if (contentStr === '{}') {
+                        contentStr = '';
+                        console.log("Content was empty object, using empty string instead");
+                    }
+                } catch (e) {
+                    console.error("Error stringifying content:", e);
+                    contentStr = '';
+                }
+            } else {
+                // Handle any other types by converting to string
+                try {
+                    contentStr = String(data.content);
+                    console.log("Content is other type, converted to string");
+                } catch (e) {
+                    console.error("Error converting content to string:", e);
+                    contentStr = '';
+                }
+            }
+            
+            console.log(`Processed file content type: ${typeof contentStr}, length: ${contentStr.length}`);
+            
+            try {
+                // Find the tab for this file again (in case it was closed during loading)
+                const tabIndex = findTabByPath(path);
+                if (tabIndex !== -1) {
+                    const tab = window.openTabs[tabIndex];
+                    
+                    // Create a model for this tab if it doesn't exist
+                    const uri = monaco.Uri.parse(`file:///${path}`);
+                    let model = monaco.editor.getModel(uri);
+                    
+                    if (!model) {
+                        model = monaco.editor.createModel(contentStr, lang, uri);
+                        tab.model = model;
+                    } else {
+                        model.setValue(contentStr);
+                    }
+                    
+                    // Set the editor model only if this is still the active tab
+                    if (window.activeTabIndex === tabIndex) {
+                        window.editor.setModel(model);
+                    }
+                    
+                    // Remove unsaved marker if present
+                    const tabElement = document.querySelector(`.editor-tab[data-index="${tabIndex}"]`);
+                    if (tabElement) tabElement.classList.remove('unsaved');
+                }
+                
+                // Log success
+                console.log(`Editor model updated for ${path}. Empty: ${contentStr.length === 0}`);
+                appendToTerminal(`Opened file: ${path}${contentStr.length === 0 ? ' (empty)' : ''}`, 'out');
+            } catch (e) {
+                console.error("Error updating editor model:", e);
+                appendToTerminal(`Error updating editor for ${path}: ${e.message}`, 'error');
+            }
+        })
+        .catch(err => {
+            // Remove loading indicator on error
+            if (tabElement) {
+                tabElement.classList.remove('loading');
+                const tabName = tabElement.querySelector('.tab-name');
+                if (tabName && tabName.dataset.originalText) {
+                    tabName.textContent = tabName.dataset.originalText;
+                    delete tabName.dataset.originalText;
+                }
+            }
+            
+            console.error(`Error opening file ${path}:`, err);
+            appendToTerminal('Error opening file: ' + err, 'error');
+        });
+    };
+
+    // If we don't have a token, get it first
+    if (!window.podToken) {
+        updatePodTokens().then(() => makeRequest());
+    } else {
+        makeRequest();
+    }
+}
 
 /*─────────────────────────────────────────────────────────────
   Vertical resizer (explorer width)
@@ -1270,6 +1853,12 @@ window.createFirstFile = function() {
             appendToTerminal(data.message || 'File created: ' + cleanFileName, 'out');
             loadFileTree();
             
+            // Determine language based on file extension
+            const lang = monaco.languages.getLanguages().find(l => l.extensions?.includes('.'+ext))?.id || 'plaintext';
+            
+            // Create a tab for the new file
+            createNewTab(cleanFileName, cleanFileName, lang, content);
+            
             // Also run the file if it's a Python file to demonstrate how it works
             if (ext === 'py') {
                 setTimeout(() => {
@@ -1421,6 +2010,13 @@ window.addEventListener('load', function() {
         // Set up automatic file check if explorer is empty
         checkForFilesAfterInitialization();
     });
+    
+    // Prevent default browser behavior for Ctrl+N
+    document.addEventListener('keydown', function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+            e.preventDefault();
+        }
+    });
 });
 
 /*─────────────────────────────────────────────────────────────
@@ -1515,53 +2111,18 @@ window.openFile = function(path, element) {
     if(window.activeItem)window.activeItem.classList.remove('active');
     element.classList.add('active');
     window.activeItem=element;
-    window.currentFile=path;
+    
+    console.log(`Opening file: ${path}`);
 
-    // Create request data
-    const requestData = { path };
-    if (window.projectId) requestData.project_id = window.projectId;
-    if (window.conversationId) requestData.conversation_id = window.conversationId;
-    if (window.podToken) requestData.token = window.podToken;
-
-    // Function to make the actual request
-    const makeRequest = () => {
-        fetch('/coding/k8s/get_file_content/', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify(requestData)
-        })
-        .then(r=>r.json())
-        .then(data=>{
-            if (data.error) {
-                // If we get a token error, try refreshing the token and retry
-                if (data.error.includes('token') && !requestData.retried) {
-                    console.log('Token error, refreshing tokens and retrying...');
-                    return updatePodTokens().then(tokens => {
-                        if (tokens && tokens.podToken) {
-                            requestData.token = tokens.podToken;
-                            requestData.retried = true;
-                            return makeRequest();
-                        } else {
-                            appendToTerminal('Error opening file: Invalid token', 'error');
-                        }
-                    });
-                }
-                appendToTerminal('Error opening file: ' + data.error, 'error');
-                return;
-            }
-            const ext=path.split('.').pop();
-            const lang=monaco.languages.getLanguages().find(l=>l.extensions?.includes('.'+ext))?.id||'plaintext';
-            window.editor.setModel(monaco.editor.createModel(data.content,lang));
-        })
-        .catch(err => appendToTerminal('Error opening file: ' + err, 'error'));
-    };
-
-    // If we don't have a token, get it first
-    if (!window.podToken) {
-        updatePodTokens().then(() => makeRequest());
-    } else {
-        makeRequest();
-    }
+    // Get the file name from the path
+    const name = path.split('/').pop();
+    
+    // Determine language based on file extension
+    const ext = path.split('.').pop();
+    const lang = monaco.languages.getLanguages().find(l => l.extensions?.includes('.'+ext))?.id || 'plaintext';
+    
+    // Create or switch to a tab for this file
+    createNewTab(name, path, lang);
 }
 
 /*── auto‑save - defined inside Monaco init but using globals ───*/
@@ -1604,93 +2165,15 @@ window.saveFile = function() {
                 return;
             }
             appendToTerminal('File saved: '+window.currentFile,'out');
+            
+            // Remove unsaved marker if present
+            const tabIndex = findTabByPath(window.currentFile);
+            if (tabIndex !== -1) {
+                const tabElement = document.querySelector(`.editor-tab[data-index="${tabIndex}"]`);
+                if (tabElement) tabElement.classList.remove('unsaved');
+            }
         })
         .catch(err=>appendToTerminal('Error saving file: '+err,'error'));
-    };
-
-    // If we don't have a token, get it first
-    if (!window.podToken) {
-        updatePodTokens().then(() => makeRequest());
-    } else {
-        makeRequest();
-    }
-}
-
-/*─────────────────────────────────────────────────────────
-  Terminal
-─────────────────────────────────────────────────────────*/
-function appendToTerminal(text, type='out') {
-    console.log(`Terminal ${type}: ${text}`);
-    
-    // If terminal output exists, append to it
-    const tOut = document.getElementById('terminal-output');
-    if (tOut) {
-        const div = document.createElement('div');
-        div.className = 'terminal-output ' + type;
-        div.textContent = text;
-        tOut.appendChild(div);
-        
-        // Auto‑scroll terminal container
-        const termEl = document.getElementById('terminal');
-        if (termEl) termEl.scrollTop = termEl.scrollHeight;
-    } else {
-        // If we're using iframe terminal, show message in console
-        console.log("Terminal output element not found - using ttyd instead");
-    }
-}
-
-/*── CRUD (create / rename / delete) ─────────────────────*/
-window.createNewFile=function(){
-    const name=prompt('Enter file name:');
-    if(!name)return hideContextMenu();
-    
-    // Use the contextMenuPath to determine where to create the file
-    let path = contextMenuPath ? `${contextMenuPath}/${name}` : name;
-    
-    // Create request data with path, content, and optional project_id or conversation_id
-    const requestData = {
-        path,
-        content: '',
-        type: 'file'
-    };
-    if (window.projectId) requestData.project_id = window.projectId;
-    if (window.conversationId) requestData.conversation_id = window.conversationId;
-    if (window.podToken) requestData.token = window.podToken;
-
-    // Function to make the actual request
-    const makeRequest = () => {
-        fetch('/coding/k8s/create_item/', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(requestData)
-        })
-        .then(r => r.json())
-        .then(res => {
-            if (res.error) {
-                // If we get a token error, try refreshing the token and retry
-                if (res.error.includes('token') && !requestData.retried) {
-                    console.log('Token error, refreshing tokens and retrying...');
-                    return updatePodTokens().then(tokens => {
-                        if (tokens && tokens.podToken) {
-                            requestData.token = tokens.podToken;
-                            requestData.retried = true;
-                            return makeRequest();
-                        } else {
-                            appendToTerminal('Error creating file: Invalid token', 'error');
-                        }
-                    });
-                }
-                appendToTerminal('Error creating file: ' + res.error, 'error');
-            } else {
-                appendToTerminal(res.message || `File created: ${path}`, 'out');
-            }
-            loadFileTree();
-        })
-        .catch(err => {
-            appendToTerminal('Error creating file: ' + err, 'error');
-            console.error("Error creating file:", err);
-        })
-        .finally(hideContextMenu);
     };
 
     // If we don't have a token, get it first
@@ -1875,6 +2358,99 @@ window.deleteItem=function(){
     .catch(err=>appendToTerminal('Error deleting item: '+err,'error'))
     .finally(hideContextMenu);
 };
+
+window.createNewFile=function(){
+    const name=prompt('Enter file name:');
+    if(!name)return hideContextMenu();
+    
+    // Use the contextMenuPath to determine where to create the file
+    let path = contextMenuPath ? `${contextMenuPath}/${name}` : name;
+    
+    // Create request data with path, content, and optional project_id or conversation_id
+    const requestData = {
+        path,
+        content: '',
+        type: 'file'
+    };
+    if (window.projectId) requestData.project_id = window.projectId;
+    if (window.conversationId) requestData.conversation_id = window.conversationId;
+    if (window.podToken) requestData.token = window.podToken;
+
+    // Function to make the actual request
+    const makeRequest = () => {
+        fetch('/coding/k8s/create_item/', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(requestData)
+        })
+        .then(r => r.json())
+        .then(res => {
+            if (res.error) {
+                // If we get a token error, try refreshing the token and retry
+                if (res.error.includes('token') && !requestData.retried) {
+                    console.log('Token error, refreshing tokens and retrying...');
+                    return updatePodTokens().then(tokens => {
+                        if (tokens && tokens.podToken) {
+                            requestData.token = tokens.podToken;
+                            requestData.retried = true;
+                            return makeRequest();
+                        } else {
+                            appendToTerminal('Error creating file: Invalid token', 'error');
+                        }
+                    });
+                }
+                appendToTerminal('Error creating file: ' + res.error, 'error');
+            } else {
+                appendToTerminal(res.message || `File created: ${path}`, 'out');
+                
+                // Refresh the file tree
+                loadFileTree();
+                
+                // Determine language based on file extension
+                const ext = path.split('.').pop();
+                const lang = monaco.languages.getLanguages().find(l => l.extensions?.includes('.'+ext))?.id || 'plaintext';
+                
+                // Create a tab for the new file
+                createNewTab(name, path, lang, '');
+            }
+        })
+        .catch(err => {
+            appendToTerminal('Error creating file: ' + err, 'error');
+            console.error("Error creating file:", err);
+        })
+        .finally(hideContextMenu);
+    };
+
+    // If we don't have a token, get it first
+    if (!window.podToken) {
+        updatePodTokens().then(() => makeRequest());
+    } else {
+        makeRequest();
+    }
+};
+
+/*─────────────────────────────────────────────────────────
+  Terminal
+─────────────────────────────────────────────────────────*/
+function appendToTerminal(text, type='out') {
+    console.log(`Terminal ${type}: ${text}`);
+    
+    // If terminal output exists, append to it
+    const tOut = document.getElementById('terminal-output');
+    if (tOut) {
+        const div = document.createElement('div');
+        div.className = 'terminal-output ' + type;
+        div.textContent = text;
+        tOut.appendChild(div);
+        
+        // Auto‑scroll terminal container
+        const termEl = document.getElementById('terminal');
+        if (termEl) termEl.scrollTop = termEl.scrollHeight;
+    } else {
+        // If we're using iframe terminal, show message in console
+        console.log("Terminal output element not found - using ttyd instead");
+    }
+}
 </script>
 {% endif %}
 </body>
