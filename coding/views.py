@@ -2265,3 +2265,140 @@ def k8s_create_item(request):
             return JsonResponse({'error': str(e)}, status=500)
     
     return JsonResponse({'error': 'POST request expected'}, status=400)
+
+@csrf_exempt
+def get_folder_contents(request):
+    """
+    API endpoint to get the contents of a specific folder from a Kubernetes pod via the FileBrowser API
+    """
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        project_id = data.get('project_id')
+        conversation_id = data.get('conversation_id')
+        folder_path = data.get('path', '')
+        token = data.get('token')
+        
+        # Validate input
+        if not (project_id or conversation_id):
+            return JsonResponse({'error': 'Either project_id or conversation_id must be provided'}, status=400)
+        
+        try:
+            # Get the pod from the database
+            query = Q()
+            if project_id:
+                query &= Q(project_id=str(project_id))
+            elif conversation_id:
+                query &= Q(conversation_id=str(conversation_id))
+            
+            pod = KubernetesPod.objects.filter(query).first()
+            
+            if not pod or pod.status != 'running':
+                return JsonResponse({
+                    'error': 'No running Kubernetes pod found',
+                    'debug_info': {
+                        'project_id': project_id,
+                        'conversation_id': conversation_id,
+                        'pod_exists': pod is not None,
+                        'pod_status': pod.status if pod else None
+                    }
+                }, status=404)
+            
+            # Get the filebrowser URL
+            filebrowser_url = None
+            if pod.service_details and 'filebrowserUrl' in pod.service_details:
+                filebrowser_url = pod.service_details.get('filebrowserUrl')
+            else:
+                # If filebrowserUrl is not directly available, try to construct it
+                if pod.service_details:
+                    filebrowser_port = pod.service_details.get('filebrowserPort')
+                    node_ip = pod.service_details.get('nodeIP')
+                    
+                    if filebrowser_port and node_ip:
+                        # Construct filebrowser URL
+                        filebrowser_url = f"http://{node_ip}:{filebrowser_port}"
+                        
+                        # Update the pod record for future requests
+                        pod.service_details['filebrowserUrl'] = filebrowser_url
+                        pod.save(update_fields=['service_details'])
+                        
+                        logger.info(f"Created and saved missing filebrowserUrl: {filebrowser_url}")
+            
+            if not filebrowser_url:
+                return JsonResponse({
+                    'error': 'FileBrowser URL not available',
+                    'debug_info': {
+                        'pod_name': pod.pod_name,
+                        'namespace': pod.namespace,
+                        'service_details': pod.service_details
+                    }
+                }, status=400)
+            
+            # Format the folder path for the API request
+            abs_path = folder_path
+            if abs_path.startswith('/'):
+                abs_path = abs_path[1:]  # Remove leading slash
+            
+            # URL encode the path for the API request
+            encoded_path = quote(abs_path, safe='')
+            
+            # Construct the API endpoint
+            api_endpoint = f"/api/resources/{encoded_path}"
+            
+            # Make API request to get directory contents
+            success, response_data, error_message = filebrowser_api_request(
+                filebrowser_url=filebrowser_url,
+                method="GET",
+                endpoint=api_endpoint
+            )
+            
+            if not success:
+                return JsonResponse({
+                    'error': f'Failed to list folder contents: {error_message}',
+                    'debug_info': {
+                        'api_endpoint': api_endpoint,
+                        'filebrowser_url': filebrowser_url
+                    }
+                }, status=500)
+            
+            # Process the response to build a simplified folder structure
+            folder_contents = []
+            
+            # The FileBrowser API response should contain an 'items' array with files and directories
+            items = response_data.get('items', [])
+            
+            # Process each item in the folder
+            for item in items:
+                name = item.get('name', '')
+                is_dir = item.get('isDir', False)
+                
+                # Skip hidden files and folders if desired
+                # if name.startswith('.'):
+                #     continue
+                
+                path = os.path.join(folder_path, name).replace('\\', '/')
+                if path.startswith('/'):
+                    path = path[1:]  # Remove leading slash
+                
+                # Add the item to our result list
+                folder_contents.append({
+                    'name': name,
+                    'type': 'directory' if is_dir else 'file',
+                    'path': path,
+                    'children': [] if is_dir else None
+                })
+            
+            # Return the folder contents
+            return JsonResponse({
+                'files': folder_contents,
+                'folder_path': folder_path,
+                'pod_info': {
+                    'namespace': pod.namespace,
+                    'pod_name': pod.pod_name,
+                    'status': pod.status
+                }
+            })
+        except Exception as e:
+            logger.exception(f"Error in get_folder_contents: {str(e)}")
+            return JsonResponse({'error': str(e)}, status=500)
+    
+    return JsonResponse({'error': 'POST request expected'}, status=400)

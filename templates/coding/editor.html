@@ -263,6 +263,34 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
 .directory>.file-tree{display:none}
 .directory.expanded>.file-tree{display:block}
 
+/* File tree loading states and messages */
+.file-item .loading-spinner {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: #0e639c;
+    animation: spin 0.8s linear infinite;
+    margin-right: 6px;
+    position: absolute;
+    left: 3px;
+}
+
+li.empty-folder {
+    padding: 4px 8px 4px calc(20px*var(--depth,1) + 20px);
+    color: #6c6c6c;
+    font-style: italic;
+    font-size: 12px;
+}
+
+li.error-message {
+    padding: 4px 8px 4px calc(20px*var(--depth,1) + 20px);
+    color: #f14c4c;
+    font-style: italic;
+    font-size: 12px;
+}
+
 /* Monaco background override */
 .monaco-editor,.monaco-editor .margin,.monaco-editor-background,
 .monaco-editor .inputarea.ime-input{background:#1e1e1e!important}
@@ -457,6 +485,12 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
 </div>
 
 <script>
+// Add this code at the top to prevent reload confirmation dialogs
+window.onbeforeunload = function() {
+    // Return null to prevent the browser from showing a confirmation dialog
+    return null;
+};
+
 /*─────────────────────────────────────────────────────────────
   Global file tree functions (accessible outside Monaco scope)
 ─────────────────────────────────────────────────────────────*/
@@ -555,13 +589,26 @@ function loadFileTree(forceRefresh = false) {
                 if(el) el.parentElement.classList.add('expanded');
             });
             
+            // Set up event handlers for directories
             container.querySelectorAll('.directory>.file-item').forEach(item => {
-                item.addEventListener('click', e => {
-                e.stopPropagation();
-                item.parentElement.classList.toggle('expanded');
+                item.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    
+                    const folderPath = this.dataset.path;
+                    const isLoaded = this.dataset.loaded === 'true';
+                    const parentDir = this.parentElement;
+                    
+                    // Toggle the expanded state of the folder
+                    parentDir.classList.toggle('expanded');
+                    
+                    // If this folder hasn't been loaded yet and is now expanded, load its contents
+                    if (!isLoaded && parentDir.classList.contains('expanded')) {
+                        loadFolderContents(folderPath, parentDir);
+                    }
+                });
             });
-        });
             
+            // Set up event handlers for files
             container.querySelectorAll('.file-item.file').forEach(item => {
                 const path = item.dataset.path;
                 item.onclick = () => window.openFile(path, item);
@@ -615,11 +662,11 @@ window.renderFileTree = function(items, isRoot=false, depth=1) {
     html+=items.map(item=>{
         if(item.type==='directory'){
             return`<li class="directory" style="--depth:${depth}">
-                      <div class="file-item" data-path="${item.path}">
+                      <div class="file-item" data-path="${item.path}" data-loaded="false">
                           <i class="mdi mdi-chevron-right"></i>
                           <i class="mdi mdi-folder${item.name.startsWith('.')?'-hidden':''}"></i>${item.name}
                       </div>
-                      ${window.renderFileTree(item.children,false,depth+1)}
+                      ${item.children && item.children.length > 0 ? window.renderFileTree(item.children,false,depth+1) : '<ul class="file-tree"></ul>'}
                     </li>`;
         }
         return`<li style="--depth:${depth}">
@@ -2450,6 +2497,131 @@ function appendToTerminal(text, type='out') {
         // If we're using iframe terminal, show message in console
         console.log("Terminal output element not found - using ttyd instead");
     }
+}
+
+// Add this new function to load folder contents dynamically
+function loadFolderContents(folderPath, parentElement) {
+    console.log(`Loading contents for folder: ${folderPath}`);
+    
+    // Show loading indicator inside the folder
+    const folderItem = parentElement.querySelector('.file-item');
+    const oldHTML = folderItem.innerHTML;
+    folderItem.innerHTML = '<div class="loading-spinner"></div>' + oldHTML;
+    
+    // Create request data
+    const requestData = { 
+        path: folderPath,
+        workspace_dir: "/workspace"
+    };
+    if (window.projectId) requestData.project_id = window.projectId;
+    if (window.conversationId) requestData.conversation_id = window.conversationId;
+    if (window.podToken) requestData.token = window.podToken;
+
+    // Make the request to get folder contents
+    fetch('/coding/k8s/get_folder_contents/', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(requestData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Remove the loading spinner
+        folderItem.innerHTML = oldHTML;
+        
+        if (data.error) {
+            console.error(`Error loading folder contents: ${data.error}`);
+            // Mark folder as not loaded so we can try again
+            folderItem.dataset.loaded = 'false';
+            
+            // Show empty folder or error indicator
+            const childList = parentElement.querySelector('ul.file-tree');
+            childList.innerHTML = `<li class="error-message">Error loading contents: ${data.error}</li>`;
+            return;
+        }
+        
+        // Debug the response
+        console.log("Folder contents received:", data);
+        
+        // Update the folder's contents
+        const folderFiles = data.files || [];
+        const childList = parentElement.querySelector('ul.file-tree');
+        
+        if (folderFiles.length === 0) {
+            childList.innerHTML = '<li class="empty-folder">Empty folder</li>';
+        } else {
+            try {
+                // Generate HTML for the folder contents
+                const folderDepth = parseInt(parentElement.style.getPropertyValue('--depth')) || 1;
+                const nextDepth = folderDepth + 1;
+                
+                // Create HTML for each item in the folder
+                let contentsHTML = '';
+                folderFiles.forEach(item => {
+                    if (item.type === 'directory') {
+                        contentsHTML += `
+                            <li class="directory" style="--depth:${nextDepth}">
+                                <div class="file-item" data-path="${item.path}" data-loaded="false">
+                                    <i class="mdi mdi-chevron-right"></i>
+                                    <i class="mdi mdi-folder${item.name.startsWith('.') ? '-hidden' : ''}"></i>${item.name}
+                                </div>
+                                <ul class="file-tree"></ul>
+                            </li>`;
+                    } else {
+                        contentsHTML += `
+                            <li style="--depth:${nextDepth}">
+                                <div class="file-item file" data-path="${item.path}">
+                                    <i class="mdi mdi-${getFileIcon(item.name)}"></i>${item.name}
+                                </div>
+                            </li>`;
+                    }
+                });
+                
+                // Update the child list with the new content
+                childList.innerHTML = contentsHTML;
+                
+                // Add click handlers to new subfolders
+                childList.querySelectorAll('.directory>.file-item').forEach(subItem => {
+                    subItem.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        const subFolderPath = this.dataset.path;
+                        const isSubLoaded = this.dataset.loaded === 'true';
+                        const subParentDir = this.parentElement;
+                        
+                        subParentDir.classList.toggle('expanded');
+                        
+                        if (!isSubLoaded && subParentDir.classList.contains('expanded')) {
+                            loadFolderContents(subFolderPath, subParentDir);
+                        }
+                    });
+                });
+                
+                // Add click handlers to new files
+                childList.querySelectorAll('.file-item.file').forEach(fileItem => {
+                    const filePath = fileItem.dataset.path;
+                    fileItem.onclick = () => window.openFile(filePath, fileItem);
+                });
+                
+                console.log(`Successfully rendered ${folderFiles.length} items in folder ${folderPath}`);
+            } catch (error) {
+                console.error("Error rendering folder contents:", error);
+                childList.innerHTML = `<li class="error-message">Error rendering contents: ${error.message}</li>`;
+                folderItem.dataset.loaded = 'false';
+                return;
+            }
+        }
+        
+        // Mark this folder as loaded
+        folderItem.dataset.loaded = 'true';
+    })
+    .catch(error => {
+        // Remove the loading spinner and restore original content
+        folderItem.innerHTML = oldHTML;
+        folderItem.dataset.loaded = 'false';
+        
+        console.error(`Error fetching folder contents: ${error}`);
+        const childList = parentElement.querySelector('ul.file-tree');
+        childList.innerHTML = `<li class="error-message">Failed to load contents: ${error.message}</li>`;
+    });
 }
 </script>
 {% endif %}

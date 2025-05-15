@@ -20,6 +20,7 @@ urlpatterns = [
     path('k8s/delete_item/', views.k8s_delete_item, name='k8s_delete_item'),
     path('k8s/rename_item/', views.k8s_rename_item, name='k8s_rename_item'),
     path('k8s/create_item/', views.k8s_create_item, name='k8s_create_item'),
+    path('k8s/get_folder_contents/', views.get_folder_contents, name='get_folder_contents'),
     
     path('k8s/get_pod_info/', views.get_k8s_pod_info, name='get_k8s_pod_info'),
     path('k8s/execute_command/', views.k8s_execute_command, name='k8s_execute_command'),

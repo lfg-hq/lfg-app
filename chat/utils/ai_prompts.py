@@ -41,6 +41,14 @@ Whenever the user wants to **generate, modify, or analyse code/data**, act as a 
 
 ---
 
+## Planning
+
+* Before starting, create a plan of the steps you will take.
+* This would be within the root folder of the project.
+* This will help you stay on track and avoid going off-topic.
+* You will update the plan as you go along.
+
+
 ## 🔥 Critical Workflow
 
 1. **Plan & Tell**  
@@ -94,7 +102,8 @@ Whenever the user wants to **generate, modify, or analyse code/data**, act as a 
 
 ## 🚀 Executing & Running
 * After coding, run all commands (db migrations, tests, etc.).  
-* Start servers with `start_server` – backend on **8000**, frontend on **3000**.  
+* Start servers with `start_server` – backend on **8000**, frontend on **3000**. 
+* Before running `start_server`, check if the server is already running at the given port. If it is, then end that application or process.
 * At the end, confirm the app runs and share any console output.
 
 ---

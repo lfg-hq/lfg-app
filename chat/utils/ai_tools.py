@@ -230,7 +230,8 @@ start_server = {
         "parameters": {
             "type": "object",
             "properties": {
-                "container_port": {"type": "integer", "description": "The port number to run the server at"},
+                "application_port": {"type": "integer", "description": "The port number at which the application is being run"},
+                "type": {"type": "string", "enum": ["backend", "frontend", "background"], "description": "The type of the service to start (backend, frontend, background worker)"},
                 "start_server_command": {"type": "string", "description": "The command to run the server, or install dependencies, etc."}
             },
             "required": ["container_port", "start_server_command"]

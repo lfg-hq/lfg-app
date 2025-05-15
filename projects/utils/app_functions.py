@@ -18,7 +18,9 @@ from coding.docker.docker_utils import (
     get_client_project_folder_path,
     add_port_to_sandbox
 )
+from coding.k8s_manager.manage_pods import get_ssh_client_for_project, execute_remote_command
 
+from coding.models import KubernetesPod
 from coding.k8s_manager import manage_kubernetes_pod, execute_command_in_pod
 
 
@@ -62,14 +64,16 @@ def app_functions(function_name, function_args, project_id, conversation_id):
             command = function_args.get('commands', '')
             print(f"Running command: {command}")
             # Run the command with either project_id or conversation_id
-            result = run_command(command, project_id=project_id, conversation_id=conversation_id)
+            # result = run_command(command, project_id=project_id, conversation_id=conversation_id)
+            result = run_command_in_k8s(command, project_id=project_id, conversation_id=conversation_id)
             return result
         
         case "start_server":
             command = function_args.get('start_server_command', '')
-            container_port = function_args.get('container_port', '')
+            application_port = function_args.get('application_port', '')
+            type = function_args.get('type', '')
             print(f"Running server: {command}")
-            result = start_server(command, container_port, project_id=project_id, conversation_id=conversation_id)
+            result = server_command_in_k8s(command, project_id=project_id, conversation_id=conversation_id, application_port=application_port, type=type)
             return result
 
     return None
@@ -751,75 +755,77 @@ def run_command_docker(command: str, project_id: int | str = None, conversation_
         }
 
 
-def run_command_k8s(command: str, project_id: int | str = None, conversation_id: int | str = None) -> dict:
+def run_command_in_k8s(command: str, project_id: int | str = None, conversation_id: int | str = None) -> dict:
     """
     Run a command in the terminal using Kubernetes pod.
-    
-    Args:
-        command: The command to run
-        project_id: The project ID (optional if conversation_id is provided)
-        conversation_id: The conversation ID (optional if project_id is provided)
-        
-    Returns:
-        Dict containing command output and pod information
     """
-    try:
-        # Convert IDs to strings for consistency if provided
-        project_id_str = str(project_id) if project_id is not None else None
-        conversation_id_str = str(conversation_id) if conversation_id is not None else None
-        
-        # Ensure we have at least one identifier
-        if project_id_str is None and conversation_id_str is None:
-            raise ValueError("Either project_id or conversation_id must be provided")
-        
-        print(f"Running command in K8s pod: {command} for project {project_id_str} and conversation {conversation_id_str}")
-        
-        # Get or create a pod using project_id or conversation_id
-        success, pod = manage_kubernetes_pod(
-            project_id=project_id_str,
-            conversation_id=conversation_id_str,
-            image="gitpod/workspace-full:latest"
-        )
-        
-        if not success or not pod:
-            raise Exception(f"Failed to create or get Kubernetes pod for project {project_id_str} or conversation {conversation_id_str}")
-        
-        print(f"\n\nKubernetes Pod: {pod.pod_name} in namespace {pod.namespace} (Status: {pod.status})")
-        
-        # If pod has a service URL, include it in the output
-        pod_info = f"Pod: {pod.pod_name} (Namespace: {pod.namespace})"
-        if pod.service_details and pod.service_details.get('access_url'):
-            pod_info += f"\nAccess URL: {pod.service_details.get('access_url')}"
-        
-        # Execute the command in the pod
-        success, stdout, stderr = execute_command_in_pod(
-            project_id=project_id_str,
-            conversation_id=conversation_id_str,
-            command=command
-        )
-        
-        if not success:
-            raise Exception(f"Command execution failed: {stderr}")
-        
+    # Fetch the Client first
+    client = get_ssh_client_for_project(project_id)
+
+    if project_id:
+        pod = KubernetesPod.objects.filter(project_id=project_id).first()
+
+    command = f"cd /workspace && {command}"
+    print(f"\n\nCommand: {command}")
+
+    if pod:
+        k8s_command = f"kubectl exec -n {pod.namespace} {pod.pod_name} -- bash -c {shlex.quote(command)}"
+
+        # execute the command in the k8s pod
+        success, stdout, stderr = execute_remote_command(client, k8s_command)
+
         print(f"\n\nCommand output: {stdout}")
-        
-        # Return the command output and pod info
-        return {
-            "is_notification": True,
-            "notification_type": "command_output",
-            "message_to_agent": f"{stdout}\n\n{pod_info}\n\nProceed to next step",
-        }
-    
-    except Exception as e:
-        error_message = f"Error running command in Kubernetes pod: {str(e)}"
-        print(error_message)
+
+    if not success or not pod:
         return {
             "is_notification": True,
             "notification_type": "command_error",
-            "message_to_agent": f"{error_message}\n\nThe command execution failed. Stop generating further steps and inform the user that the command could not be executed.",
-            "command": command,
-            "error": str(e)
+            "message_to_agent": f"{stderr}\n\nThe command execution failed. Stop generating further steps and inform the user that the command could not be executed.",
         }
+    
+    return {
+        "is_notification": True,
+        "notification_type": "command_output",
+        "message_to_agent": f"{stdout}\n\nProceed to next step",
+    }
+
+
+def server_command_in_k8s(command: str, project_id: int | str = None, conversation_id: int | str = None, application_port: int = None, type: str = None) -> dict:
+    """
+    Run a command in the terminal using Kubernetes pod.
+    """
+    # Fetch the Client first
+    client = get_ssh_client_for_project(project_id)
+
+    print(f"\n\nApplication port: {application_port}")
+    print(f"\n\nType: {type}")
+
+    if project_id:
+        pod = KubernetesPod.objects.filter(project_id=project_id).first()
+
+    command = f"cd /workspace && {command} > /workspace/tmp/cmd_output.log 2>&1 &"
+    print(f"\n\nCommand: {command}")
+
+    if pod:
+        k8s_command = f"kubectl exec -n {pod.namespace} {pod.pod_name} -- bash -c {shlex.quote(command)}"
+
+        # execute the command in the k8s pod
+        success, stdout, stderr = execute_remote_command(client, k8s_command)
+
+        print(f"\n\nCommand output: {stdout}")
+
+    if not success or not pod:
+        return {
+            "is_notification": True,
+            "notification_type": "command_error",
+            "message_to_agent": f"{stderr}\n\nThe command execution failed. Stop generating further steps and inform the user that the command could not be executed.",
+        }
+    
+    return {
+        "is_notification": True,
+        "notification_type": "command_output",
+        "message_to_agent": f"{stdout}\n\Command to run server is successful. Proceed to next step",
+    }
 
 
 def run_command(command: str, project_id: int | str = None, conversation_id: int | str = None, use_k8s: bool = False) -> dict:

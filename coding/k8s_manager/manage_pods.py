@@ -1594,6 +1594,55 @@ def execute_command_in_pod(project_id=None, conversation_id=None, command=None):
         return False, "", f"Error: {str(e)}"
 
 
+def get_ssh_client_for_project(project_id):
+    """
+    Get an SSH client for a specific project.
+    
+    Args:
+        project_id (str): Project ID
+        
+    Returns:
+        paramiko.SSHClient: Connected SSH client or None if connection fails
+    """
+    if not project_id:
+        logger.error("Project ID must be provided")
+        return None
+    
+    try:
+        # Get pod details from database
+        pod = KubernetesPod.objects.filter(project_id=project_id).first()
+        
+        if not pod:
+            logger.error(f"No pod found for project_id={project_id}")
+            return None
+        
+        # Get SSH connection details from the pod
+        ssh_connection_details = pod.ssh_connection_details
+        
+        # Create SSH client
+        client = None
+        if ssh_connection_details:
+            client = create_ssh_client(
+                host=ssh_connection_details.get('host'),
+                port=ssh_connection_details.get('port'),
+                username=ssh_connection_details.get('username'),
+                key_file=ssh_connection_details.get('key_file'),
+                key_string=ssh_connection_details.get('key_string'),
+                key_passphrase=ssh_connection_details.get('key_passphrase')
+            )
+        else:
+            client = create_ssh_client()
+        
+        if not client:
+            logger.error("Failed to create SSH client")
+            return None
+        
+        return client
+    except Exception as e:
+        logger.error(f"Error creating SSH client for project {project_id}: {str(e)}")
+        return None
+
+
 def delete_kubernetes_pod(project_id=None, conversation_id=None, preserve_data=True):
     """
     Delete a Kubernetes pod.
