@@ -11,25 +11,29 @@ from google.genai.types import (
     HttpOptions,
     Tool,
 )
-from .ai_tools import tools as ai_tools
 from projects.utils.app_functions import app_functions
+from chat.models import AgentRole, ModelSelection
+from projects.models import Project
 import traceback # Import traceback for better error logging
 
 class AIProvider:
     """Base class for AI providers"""
     
     @staticmethod
-    def get_provider(provider_name):
+    def get_provider(provider_name, selected_model):
         """Factory method to get the appropriate provider"""
-        # provider_name = "anthropic"
         providers = {
-            'openai': OpenAIProvider,
-            # 'anthropic': AnthropicProvider,
-            # 'google': GoogleAIProvider
+            'openai': lambda: OpenAIProvider(selected_model),
+            # 'anthropic': lambda: AnthropicProvider(selected_model),
+            # 'google': lambda: GoogleAIProvider(selected_model)
         }
-        return providers.get(provider_name, OpenAIProvider)()
+        provider_factory = providers.get(provider_name)
+        if provider_factory:
+            return provider_factory()
+        else:
+            return OpenAIProvider(selected_model)  # Default fallback
     
-    def generate_stream(self, messages, project_id):
+    def generate_stream(self, messages, project_id, conversation_id, tools):
         """Generate streaming response from the AI provider"""
         raise NotImplementedError("Subclasses must implement this method")
 
@@ -37,24 +41,28 @@ class AIProvider:
 class OpenAIProvider(AIProvider):
     """OpenAI provider implementation"""
     
-    def __init__(self):
-        # api_key = os.getenv('OPENAI_API_KEY')
-        api_key = os.getenv('ANTHROPIC_API_KEY')
+    def __init__(self, selected_model):
 
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY environment variable is not set. Please check your .env file.")
-        
-        # Initialize OpenAI client without proxies parameter
-        # This is compatible with newer versions of the OpenAI library
-        # self.client = openai.OpenAI(api_key=api_key)
-        self.client = openai.OpenAI(api_key=api_key, base_url="https://api.anthropic.com/v1/")
-        # self.model = "gpt-4o"
-        self.model = "claude-3-7-sonnet-20250219"
-        # self.model = "gpt-4.1"
-    
-    def generate_stream(self, messages, project_id, conversation_id):
+        print(f"[OpenAIProvider Debug] Selected model: {selected_model}")
+
+        openai_api_key = os.getenv('OPENAI_API_KEY') 
+        anthropic_api_key = os.getenv('ANTHROPIC_API_KEY')
+
+        if selected_model == "gpt_4o":
+            self.model = "gpt-4o"
+            self.client = openai.OpenAI(api_key=openai_api_key)
+        elif selected_model == "gpt_4.1":
+            self.model = "gpt-4.1"
+            self.client = openai.OpenAI(api_key=openai_api_key)
+        elif selected_model == "claude_4_sonnet":
+            self.model = "claude-sonnet-4-20250514"
+            print(f"[OpenAIProvider Debug] Selected model: {self.model}")
+            self.client = openai.OpenAI(api_key=anthropic_api_key, base_url="https://api.anthropic.com/v1/")
+
+
+    def generate_stream(self, messages, project_id, conversation_id, tools):
         current_messages = list(messages) # Work on a copy
-        
+
         while True: # Loop to handle potential multi-turn tool calls (though typically one round)
             try:
                 params = {
@@ -62,7 +70,7 @@ class OpenAIProvider(AIProvider):
                     "messages": current_messages,
                     "stream": True,
                     "tool_choice": "auto", 
-                    "tools": ai_tools
+                    "tools": tools
                 }
                 
                 print(f"\n[OpenAIProvider Debug] Making API call with {len(current_messages)} messages.")
@@ -78,7 +86,7 @@ class OpenAIProvider(AIProvider):
                 tool_calls_requested = [] # Stores {id, function_name, function_args_str}
                 full_assistant_message = {"role": "assistant", "content": None, "tool_calls": []} # To store the complete assistant turn
 
-                print("Hey!!")
+                print("New Loop!!")
                 
                 # --- Process the stream from the API --- 
                 for chunk in response_stream:
@@ -91,7 +99,7 @@ class OpenAIProvider(AIProvider):
                     if delta.content:
                         yield delta.content # Stream text content immediately
                         if full_assistant_message["content"] is None:
-                            full_assistant_message["content"] = "Not generated yet"
+                            full_assistant_message["content"] = "-"
                         full_assistant_message["content"] += delta.content
 
                     # --- Accumulate Tool Call Details --- 
@@ -119,19 +127,27 @@ class OpenAIProvider(AIProvider):
                                         notification_type = "features"
                                     elif function_name == "extract_personas":
                                         notification_type = "personas"
+                                    elif function_name == "start_server":
+                                        notification_type = "start_server"
+                                    elif function_name == "execute_command":
+                                        notification_type = "execute_command"
                                     
                                     # Send early notification if it's an extraction function
                                     if notification_type:
                                         print(f"\n\n=== SENDING EARLY NOTIFICATION FOR {function_name} ===")
+                                        # Create a notification with a special marker to make it clearly identifiable
                                         early_notification = {
                                             "is_notification": True,
                                             "notification_type": notification_type,
                                             "early_notification": True,
-                                            "function_name": function_name
+                                            "function_name": function_name,
+                                            "notification_marker": "__NOTIFICATION__"  # Special marker
                                         }
-                                        yield json.dumps(early_notification)
-                                        print(f"Early notification sent__: {early_notification}")
+                                        notification_json = json.dumps(early_notification)
+                                        print(f"Early notification sent: {notification_json}")
                                         print("==========================================\n\n")
+                                        # Yield as a special formatted string that can be easily detected
+                                        yield f"__NOTIFICATION__{notification_json}__NOTIFICATION__"
                                 
                                 if tool_call_chunk.function.arguments:
                                     current_tc["function"]["arguments"] += tool_call_chunk.function.arguments
@@ -178,10 +194,51 @@ class OpenAIProvider(AIProvider):
                                         print("[OpenAIProvider Debug] Empty arguments string, defaulting to empty object")
                                     else:
                                         parsed_args = json.loads(tool_call_args_str)
-                                    tool_result = app_functions(tool_call_name, parsed_args, project_id, conversation_id)
+                                        # Check for both possible spellings of "explanation"
+                                        explanation = parsed_args.get("explanation", parsed_args.get("explaination", ""))
+                                        
+                                        if explanation:
+                                            print(f"\n\n[OpenAIProvider Debug] Found explanation: {explanation}\n\n")
+                                            
+                                            # Format the explanation nicely with markdown
+                                            formatted_explanation = f"\n\n{explanation}\n\n"
+                                            
+                                            # Add to the assistant message content
+                                            if full_assistant_message.get("content", None) is None:
+                                                print(f"\n\n[OpenAIProvider Debug] Setting content to: {formatted_explanation}\n\n")
+                                                full_assistant_message["content"] = formatted_explanation
+                                            else:
+                                                full_assistant_message["content"] += formatted_explanation
+                                            
+                                            # Yield the explanation immediately so it streams to the frontend
+                                            yield "*"
+                                    # Log the function call with clean arguments
+                                    print(f"[OpenAIProvider Debug] Calling app_functions with {tool_call_name}, {parsed_args}, {project_id}, {conversation_id}")
+                                    
+                                    # Execute the function with extensive logging and error handling
+                                    try:
+                                        tool_result = app_functions(tool_call_name, parsed_args, project_id, conversation_id)
+                                        print(f"[OpenAIProvider Debug] app_functions call successful for {tool_call_name}")
+                                    except Exception as func_error:
+                                        print(f"[OpenAIProvider Error] Error calling app_functions: {str(func_error)}")
+                                        print(f"[OpenAIProvider Error] Traceback: {traceback.format_exc()}")
+                                        # Rethrow to be caught by the outer try-except
+                                        raise
 
                                     print("\n\n\n\nTool Result: ", tool_result)
-                                    print("\n\n\n\n")
+                                    
+                                    # Send special notification for extraction functions regardless of result
+                                    if tool_call_name in ["extract_features", "extract_personas"]:
+                                        notification_type = "features" if tool_call_name == "extract_features" else "personas"
+                                        print(f"\n\n=== FORCING NOTIFICATION FOR {tool_call_name} ===")
+                                        notification_data = {
+                                            "is_notification": True,
+                                            "notification_type": notification_type,
+                                            "function_name": tool_call_name,
+                                            "notification_marker": "__NOTIFICATION__"
+                                        }
+                                        print(f"Forced notification: {notification_data}")
+                                        print("==========================================\n\n")
                                     
                                     # Handle the case where tool_result is None
                                     if tool_result is None:
@@ -194,7 +251,8 @@ class OpenAIProvider(AIProvider):
                                         
                                         notification_data = {
                                             "is_notification": True,
-                                            "notification_type": tool_result.get("notification_type", "features")
+                                            "notification_type": tool_result.get("notification_type", "features"),
+                                            "notification_marker": "__NOTIFICATION__"  # Special marker
                                         }
                                         
                                         print(f"Notification data to be yielded: {notification_data}")
@@ -202,7 +260,6 @@ class OpenAIProvider(AIProvider):
                                         
                                         # Use the message_to_agent as the result content
                                         result_content = str(tool_result.get("message_to_agent", ""))
-                                        # print(f"\n\n\n\nResult content: {result_content}")
                                     else:
                                         # Normal case without notification or when tool_result is a string
                                         if isinstance(tool_result, str):
@@ -231,15 +288,14 @@ class OpenAIProvider(AIProvider):
                                     "tool_call_id": tool_call_id,
                                     "content": f"Tool call {tool_call_name}() completed. {result_content}."
                                 })
-
-                                # print("\n\n\n\nTool Results Messages: ", tool_results_messages)
                                 
-                                # If we have notification data, yield it to the consumer
+                                # If we have notification data, yield it to the consumer with the special format
                                 if notification_data:
                                     print("\n\n=== YIELDING NOTIFICATION DATA TO CONSUMER ===")
-                                    print(f"Notification JSON: {json.dumps(notification_data)}")
+                                    notification_json = json.dumps(notification_data)
+                                    print(f"Notification JSON: {notification_json}")
                                     print("============================================\n\n")
-                                    yield json.dumps(notification_data)
+                                    yield f"__NOTIFICATION__{notification_json}__NOTIFICATION__"
                                 
                             current_messages.extend(tool_results_messages) # Add tool results
                             # Continue the outer while loop to make the next API call

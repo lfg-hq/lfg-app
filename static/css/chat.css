@@ -153,20 +153,25 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    padding: 6px 10px;
+    /* background-color: rgba(30, 30, 30, 0.2); */
+    background-color: var(--card-bg);
+    border-radius: 20px;
 }
 
 .action-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
     border: none;
     background-color: rgba(187, 134, 252, 0.1);
     color: var(--primary-color, #bb86fc);
     cursor: pointer;
     transition: all 0.2s ease;
+    font-size: 12px;
 }
 
 .action-btn:hover {
@@ -174,13 +179,73 @@
     transform: translateY(-2px);
 }
 
+/* Role dropdown styling */
+.role-dropdown {
+    height: 28px;
+    background-color: rgba(187, 134, 252, 0.1);
+    color: var(--primary-color, #bb86fc);
+    border: none;
+    border-radius: 14px;
+    padding: 0 10px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 24 24' fill='none' stroke='%23bb86fc' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    padding-right: 24px;
+}
+
+.role-dropdown:hover {
+    background-color: rgba(187, 134, 252, 0.2);
+}
+
+.role-dropdown:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(187, 134, 252, 0.3);
+}
+
+/* Model dropdown styling */
+.model-dropdown {
+    height: 28px;
+    background-color: rgba(187, 134, 252, 0.1);
+    color: var(--primary-color, #bb86fc);
+    border: none;
+    border-radius: 14px;
+    padding: 0 10px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 24 24' fill='none' stroke='%23bb86fc' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    padding-right: 24px;
+}
+
+.model-dropdown:hover {
+    background-color: rgba(187, 134, 252, 0.2);
+}
+
+.model-dropdown:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(187, 134, 252, 0.3);
+}
+
 #file-upload-btn {
-    font-size: 14px;
+    font-size: 12px;
 }
 
 /* Adjust chat input padding to accommodate the action buttons */
 #chat-input {
-    padding-right: 48px;
+    padding-right: 0px;
+    padding-bottom: 45px;
+    min-height: 80px;
 }
 
 /* File info notification styles */
@@ -342,4 +407,18 @@
 
 .file-notification.uploading i {
     color: #2196f3;
+}
+
+/* Role indicator in messages */
+.role-indicator {
+    position: absolute;
+    top: -18px;
+    right: 5px;
+    background-color: rgba(187, 134, 252, 0.2);
+    color: var(--primary-color, #bb86fc);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: capitalize;
 } 

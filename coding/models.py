@@ -300,3 +300,16 @@ class KubernetesPortMapping(models.Model):
     
     def __str__(self):
         return f"{self.service_name}: {self.container_port} ({self.container_name}) for pod {self.pod.pod_name}"
+
+
+class CommandExecution(models.Model):
+    """
+    Model to store history of commands executed in the system.
+    """
+    project_id = models.CharField(max_length=255, blank=True, null=True)
+    command = models.TextField(help_text="The command that was executed")
+    output = models.TextField(blank=True, null=True, help_text="Output from the command")
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"Command: {self.command[:50]}{'...' if len(self.command) > 50 else ''}"

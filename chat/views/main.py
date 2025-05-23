@@ -5,12 +5,14 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from chat.models import Conversation, Message
+from chat.models import Conversation, Message, AgentRole, ModelSelection
 import markdown
 from django.conf import settings
 from chat.utils.ai_providers import AIProvider
 from django.contrib.auth.decorators import login_required
 from projects.models import Project
+from django.utils.decorators import method_decorator
+from django.views import View
 
 
 @login_required
@@ -187,4 +189,181 @@ def toggle_sidebar(request):
         request.user.profile.sidebar_collapsed = collapsed
         request.user.profile.save()
     
-    return JsonResponse({"success": True, "collapsed": collapsed}) 
+    return JsonResponse({"success": True, "collapsed": collapsed})
+
+@login_required
+@require_http_methods(["GET", "PUT"])
+@csrf_exempt
+def user_agent_role(request):
+    """Get or update the current user's agent role"""
+    
+    if request.method == "GET":
+        # Get user's agent role or create default one
+        agent_role, created = AgentRole.objects.get_or_create(
+            user=request.user,
+            defaults={'name': 'product_analyst'}
+        )
+        
+        return JsonResponse({
+            'success': True,
+            'agent_role': {
+                'name': agent_role.name,
+                'display_name': agent_role.get_display_name(),
+                'created_at': agent_role.created_at.isoformat(),
+                'updated_at': agent_role.updated_at.isoformat()
+            }
+        })
+    
+    elif request.method == "PUT":
+        try:
+            data = json.loads(request.body)
+            role_name = data.get('name')
+            
+            if not role_name:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Role name is required'
+                }, status=400)
+            
+            # Map frontend values to backend values
+            role_mapping = {
+                'developer': 'developer',
+                'designer': 'designer',
+                'product_analyst': 'product_analyst',
+                'default': 'product_analyst'
+            }
+            
+            # Convert frontend role name to backend role name
+            backend_role_name = role_mapping.get(role_name, role_name)
+            
+            # Validate role name
+            valid_roles = [choice[0] for choice in AgentRole.ROLE_CHOICES]
+            if backend_role_name not in valid_roles:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'Invalid role. Must be one of: {", ".join(valid_roles)}'
+                }, status=400)
+            
+            # Get or create user's agent role and update it
+            agent_role, created = AgentRole.objects.get_or_create(
+                user=request.user,
+                defaults={'name': backend_role_name}
+            )
+            
+            if not created:
+                agent_role.name = backend_role_name
+                agent_role.save()
+            
+            return JsonResponse({
+                'success': True,
+                'message': f'Agent role updated to {agent_role.get_display_name()}',
+                'agent_role': {
+                    'name': agent_role.name,
+                    'display_name': agent_role.get_display_name(),
+                    'created_at': agent_role.created_at.isoformat(),
+                    'updated_at': agent_role.updated_at.isoformat()
+                }
+            })
+            
+        except json.JSONDecodeError:
+            return JsonResponse({
+                'success': False,
+                'error': 'Invalid JSON data'
+            }, status=400)
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+
+@login_required
+@require_http_methods(["GET", "PUT"])
+@csrf_exempt
+def user_model_selection(request):
+    """Get or update the current user's selected AI model"""
+    
+    if request.method == "GET":
+        # Get user's model selection or create default one
+        model_selection, created = ModelSelection.objects.get_or_create(
+            user=request.user,
+            defaults={'selected_model': 'claude_4_sonnet'}
+        )
+        
+        return JsonResponse({
+            'success': True,
+            'model_selection': {
+                'selected_model': model_selection.selected_model,
+                'display_name': model_selection.get_display_name(),
+                'created_at': model_selection.created_at.isoformat(),
+                'updated_at': model_selection.updated_at.isoformat()
+            }
+        })
+    
+    elif request.method == "PUT":
+        try:
+            data = json.loads(request.body)
+            selected_model = data.get('selected_model')
+            
+            if not selected_model:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Selected model is required'
+                }, status=400)
+            
+            # Validate model choice
+            valid_models = [choice[0] for choice in ModelSelection.MODEL_CHOICES]
+            if selected_model not in valid_models:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'Invalid model. Must be one of: {", ".join(valid_models)}'
+                }, status=400)
+            
+            # Get or create user's model selection and update it
+            model_selection, created = ModelSelection.objects.get_or_create(
+                user=request.user,
+                defaults={'selected_model': selected_model}
+            )
+            
+            if not created:
+                model_selection.selected_model = selected_model
+                model_selection.save()
+            
+            return JsonResponse({
+                'success': True,
+                'message': f'Model selection updated to {model_selection.get_display_name()}',
+                'model_selection': {
+                    'selected_model': model_selection.selected_model,
+                    'display_name': model_selection.get_display_name(),
+                    'created_at': model_selection.created_at.isoformat(),
+                    'updated_at': model_selection.updated_at.isoformat()
+                }
+            })
+            
+        except json.JSONDecodeError:
+            return JsonResponse({
+                'success': False,
+                'error': 'Invalid JSON data'
+            }, status=400)
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+
+@login_required
+@require_http_methods(["GET"])
+def available_models(request):
+    """Get list of available AI models"""
+    
+    models = [
+        {
+            'value': choice[0],
+            'display_name': choice[1]
+        }
+        for choice in ModelSelection.MODEL_CHOICES
+    ]
+    
+    return JsonResponse({
+        'success': True,
+        'models': models
+    }) 

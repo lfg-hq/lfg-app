@@ -20,8 +20,10 @@ from coding.docker.docker_utils import (
 )
 from coding.k8s_manager.manage_pods import get_ssh_client_for_project, execute_remote_command
 
-from coding.models import KubernetesPod
+from coding.models import KubernetesPod, KubernetesPortMapping
 from coding.k8s_manager import manage_kubernetes_pod, execute_command_in_pod
+from coding.models import CommandExecution
+from accounts.models import GitHubToken
 
 
 def app_functions(function_name, function_args, project_id, conversation_id):
@@ -32,26 +34,26 @@ def app_functions(function_name, function_args, project_id, conversation_id):
     print(f"Function args: {function_args}")
 
     match function_name:
-        # case "extract_features":
-        #     return extract_features(function_args, project_id)
-        # case "extract_personas":
-        #     return extract_personas(function_args, project_id)
-        # case "get_features":
-        #     return get_features(project_id)
-        # case "get_personas":
-        #     return get_personas(project_id)
-        # case "save_prd":
-        #     return save_prd(function_args, project_id)
-        # case "get_prd":
-        #     return get_prd(project_id)
-        # case "save_features":
-        #     return save_features(project_id)
-        # case "save_personas":
-        #     return save_personas(project_id)
-        # case "design_schema":
-        #     return save_design_schema(function_args, project_id)
-        # case "generate_tickets":
-        #     return generate_tickets(project_id)
+        case "extract_features":
+            return extract_features(function_args, project_id)
+        case "extract_personas":
+            return extract_personas(function_args, project_id)
+        case "get_features":
+            return get_features(project_id)
+        case "get_personas":
+            return get_personas(project_id)
+        case "save_prd":
+            return save_prd(function_args, project_id)
+        case "get_prd":
+            return get_prd(project_id)
+        case "save_features":
+            return save_features(project_id)
+        case "save_personas":
+            return save_personas(project_id)
+        case "design_schema":
+            return save_design_schema(function_args, project_id)
+        case "generate_tickets":
+            return generate_tickets(project_id)
         # # case "generate_code":
         # #     return generate_code(function_args, project_id)
         # case "write_code_file":
@@ -75,6 +77,9 @@ def app_functions(function_name, function_args, project_id, conversation_id):
             print(f"Running server: {command}")
             result = server_command_in_k8s(command, project_id=project_id, conversation_id=conversation_id, application_port=application_port, type=type)
             return result
+        
+        case "get_github_access_token":
+            return get_github_access_token(project_id=project_id, conversation_id=conversation_id)
 
     return None
 
@@ -755,6 +760,54 @@ def run_command_docker(command: str, project_id: int | str = None, conversation_
         }
 
 
+
+def get_github_access_token(project_id: int | str = None, conversation_id: int | str = None) -> dict:
+    """
+    Run a command in the terminal using Kubernetes pod.
+    """
+    """
+    Commit code in the Kubernetes pod.
+    """
+    try:
+        # Get project to find user_id
+        from projects.models import Project
+        
+        project = Project.objects.get(id=project_id)
+        user_id = project.owner.id
+
+        github_token = GitHubToken.objects.get(user_id=user_id)
+        access_token = github_token.access_token
+
+        if access_token is None or access_token == "":
+            return {
+                "is_notification": True,
+                "notification_type": "command_error",
+                "message_to_agent": f"No Github access token found. Inform user to connect their Github account."
+            }
+        
+        
+        return {
+            "is_notification": True,
+            "notification_type": "command_output", 
+            "message_to_agent": f"Github access token {access_token} found and project name {project.name} found. Please use this to commit the code",
+            "user_id": user_id
+        }
+
+    except Project.DoesNotExist:
+        return {
+            "is_notification": True,
+            "notification_type": "command_error",
+            "message_to_agent": f"Project with ID {project_id} not found"
+        }
+    except Exception as e:
+        return {
+            "is_notification": True,
+            "notification_type": "command_error", 
+            "message_to_agent": f"Error getting user_id: {str(e)}"
+        }
+
+
+
 def run_command_in_k8s(command: str, project_id: int | str = None, conversation_id: int | str = None) -> dict:
     """
     Run a command in the terminal using Kubernetes pod.
@@ -765,18 +818,38 @@ def run_command_in_k8s(command: str, project_id: int | str = None, conversation_
     if project_id:
         pod = KubernetesPod.objects.filter(project_id=project_id).first()
 
-    command = f"cd /workspace && {command}"
-    print(f"\n\nCommand: {command}")
+    command_to_run = f"cd /workspace && {command}"
+    print(f"\n\nCommand: {command_to_run}")
+
+    # Create command record in database
+    cmd_record = CommandExecution.objects.create(
+        project_id=project_id,
+        command=command,
+        output=None  # Will update after execution
+    )
+
+    success = False
+    stdout = ""
+    stderr = ""
 
     if pod:
-        k8s_command = f"kubectl exec -n {pod.namespace} {pod.pod_name} -- bash -c {shlex.quote(command)}"
+        k8s_command = f"kubectl exec -n {pod.namespace} {pod.pod_name} -- bash -c {shlex.quote(command_to_run)}"
 
         # execute the command in the k8s pod
         success, stdout, stderr = execute_remote_command(client, k8s_command)
 
         print(f"\n\nCommand output: {stdout}")
 
+        # Update command record with output
+        cmd_record.output = stdout if success else stderr
+        cmd_record.save()
+
     if not success or not pod:
+        # If no pod is found, update the command record
+        if not pod:
+            cmd_record.output = "No Kubernetes pod found for the project"
+            cmd_record.save()
+            
         return {
             "is_notification": True,
             "notification_type": "command_error",
@@ -785,14 +858,24 @@ def run_command_in_k8s(command: str, project_id: int | str = None, conversation_
     
     return {
         "is_notification": True,
-        "notification_type": "command_output",
+        "notification_type": "command_output", 
         "message_to_agent": f"{stdout}\n\nProceed to next step",
     }
 
 
-def server_command_in_k8s(command: str, project_id: int | str = None, conversation_id: int | str = None, application_port: int = None, type: str = None) -> dict:
+def server_command_in_k8s(command: str, project_id: int | str = None, conversation_id: int | str = None, application_port: int | str = None, type: str = None) -> dict:
     """
-    Run a command in the terminal using Kubernetes pod.
+    Run a command in the terminal using Kubernetes pod to start an application server.
+    
+    Args:
+        command: The command to run
+        project_id: The project ID
+        conversation_id: The conversation ID
+        application_port: The port the application listens on inside the container
+        type: The type of application (frontend, backend, etc.)
+        
+    Returns:
+        Dict containing command output and port mapping information
     """
     # Fetch the Client first
     client = get_ssh_client_for_project(project_id)
@@ -802,29 +885,167 @@ def server_command_in_k8s(command: str, project_id: int | str = None, conversati
 
     if project_id:
         pod = KubernetesPod.objects.filter(project_id=project_id).first()
+    else:
+        return {
+            "is_notification": True,
+            "notification_type": "command_error",
+            "message_to_agent": f"No project ID provided. Cannot execute the command."
+        }
 
-    command = f"cd /workspace && {command} > /workspace/tmp/cmd_output.log 2>&1 &"
-    print(f"\n\nCommand: {command}")
+    if not pod:
+        return {
+            "is_notification": True,
+            "notification_type": "command_error",
+            "message_to_agent": f"No Kubernetes pod found for the project. Cannot execute the command."
+        }
 
-    if pod:
-        k8s_command = f"kubectl exec -n {pod.namespace} {pod.pod_name} -- bash -c {shlex.quote(command)}"
+    # Handle application port if provided
+    if application_port:
+        try:
+            # Convert application_port to integer if it's a string
+            application_port = int(application_port)
+            
+            # Check if port is in valid range
+            if application_port < 1 or application_port > 65535:
+                return {
+                    "is_notification": True,
+                    "notification_type": "command_error",
+                    "message_to_agent": f"Invalid application port: {application_port}. Port must be between 1 and 65535."
+                }
+        except (ValueError, TypeError):
+            return {
+                "is_notification": True,
+                "notification_type": "command_error",
+                "message_to_agent": f"Invalid application port: {application_port}. Must be a valid integer."
+            }
+            
+        # Standardize port type
+        port_type = type.lower() if type else "application"
+        if port_type not in ["frontend", "backend", "application"]:
+            port_type = "application"
+            
+        # Check if we've already set up a port mapping for this container port
+        existing_mapping = KubernetesPortMapping.objects.filter(
+            pod=pod,
+            container_port=application_port
+        ).first()
+        
+        service_name = f"{pod.namespace}-service"
+        
+        if existing_mapping:
+            # Use existing mapping
+            print(f"Using existing port mapping for {port_type} port {application_port}")
+            node_port = existing_mapping.node_port
+        else:
+            # Need to add port to service and create mapping
+            print(f"Creating new port mapping for {port_type} port {application_port}")
+            
+            # Define a unique port name for this application port
+            port_name = f"{port_type}-{application_port}"
+            
+            # Patch the service to add the new port
+            patch_yaml = f"""
+spec:
+  ports:
+  - name: {port_name}
+    port: {application_port}
+    targetPort: {application_port}
+    protocol: TCP
+"""
+            # Apply the patch to add the new port to the service
+            success, stdout, stderr = execute_remote_command(
+                client, f"kubectl patch service {service_name} -n {pod.namespace} --type=strategic -p '{patch_yaml}'"
+            )
+            
+            if not success:
+                return {
+                    "is_notification": True,
+                    "notification_type": "command_error",
+                    "message_to_agent": f"Failed to add port to service: {stderr}"
+                }
+                
+            # Get the nodePort that Kubernetes assigned
+            success, stdout, stderr = execute_remote_command(
+                client, f"kubectl get service {service_name} -n {pod.namespace} -o jsonpath='{{.spec.ports[?(@.name==\"{port_name}\")].nodePort}}'"
+            )
+            
+            if not success or not stdout:
+                return {
+                    "is_notification": True,
+                    "notification_type": "command_error",
+                    "message_to_agent": f"Failed to get nodePort for port {application_port}: {stderr}"
+                }
+                
+            node_port = stdout.strip()
+            print(f"Kubernetes assigned nodePort {node_port} for {port_type} port {application_port}")
+            
+            # Get node IP 
+            success, stdout, stderr = execute_remote_command(
+                client, "kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type==\"InternalIP\")].address}'"
+            )
+            
+            node_ip = stdout.strip() if success and stdout else "localhost"
+            
+            # Create port mapping in database
+            description = f"{port_type.capitalize()} service"
+            KubernetesPortMapping.objects.create(
+                pod=pod,
+                container_name="dev-environment",
+                container_port=application_port,
+                service_port=application_port,
+                node_port=node_port,
+                protocol="TCP",
+                service_name=service_name,
+                description=description
+            )
+            
+            # Update pod's service_details
+            service_details = pod.service_details or {}
+            app_port_key = f"{port_type}Port"
+            app_url_key = f"{port_type}Url"
+            
+            service_details[app_port_key] = node_port
+            service_details["nodeIP"] = node_ip
+            service_details[app_url_key] = f"http://{node_ip}:{node_port}"
+            
+            pod.service_details = service_details
+            pod.save()
+    
+    # Prepare and run the command in the pod
+    kill_command = "pkill -f 'python -m http.server 4500' || true"
 
-        # execute the command in the k8s pod
-        success, stdout, stderr = execute_remote_command(client, k8s_command)
+    full_command = f"mkdir -p /workspace/tmp && cd /workspace && {kill_command} && {command} > /workspace/tmp/cmd_output.log 2>&1 &"
+    print(f"\n\nCommand: {full_command}")
 
-        print(f"\n\nCommand output: {stdout}")
+    k8s_command = f"kubectl exec -n {pod.namespace} {pod.pod_name} -- bash -c {shlex.quote(full_command)}"
 
-    if not success or not pod:
+    # Execute the command in the k8s pod
+    success, stdout, stderr = execute_remote_command(client, k8s_command)
+    print(f"\n\nCommand output: {stdout}")
+
+    if not success:
         return {
             "is_notification": True,
             "notification_type": "command_error",
             "message_to_agent": f"{stderr}\n\nThe command execution failed. Stop generating further steps and inform the user that the command could not be executed.",
         }
     
+    # Prepare success message with port information if applicable
+    message = f"{stdout}\n\nCommand to run server is successful."
+    
+    if application_port:
+        # Get the pod's service details
+        service_details = pod.service_details or {}
+        node_ip = service_details.get('nodeIP', 'localhost')
+        
+        # Add URL information to the message
+        message += f"\n\n{port_type.capitalize()} is running on port {application_port} inside the container."
+        message += f"\nYou can access it at: http://{node_ip}:{node_port}"
+    
     return {
         "is_notification": True,
         "notification_type": "command_output",
-        "message_to_agent": f"{stdout}\n\Command to run server is successful. Proceed to next step",
+        "message_to_agent": message + "\n\nProceed to next step",
     }
 
 

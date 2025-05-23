@@ -216,8 +216,9 @@ execute_command = {
             "type": "object",
             "properties": {
                 "commands": {"type": "string", "description": "The command that needs to be executed."},
+                "explaination": {"type": "string", "description": "A short explaination of this task, along with the `command` in the Markdown format"}
             },
-            "required": ["commands"]
+            "required": ["commands", "explaination"]
         }
     }
 }
@@ -231,14 +232,25 @@ start_server = {
             "type": "object",
             "properties": {
                 "application_port": {"type": "integer", "description": "The port number at which the application is being run"},
-                "type": {"type": "string", "enum": ["backend", "frontend", "background"], "description": "The type of the service to start (backend, frontend, background worker)"},
-                "start_server_command": {"type": "string", "description": "The command to run the server, or install dependencies, etc."}
+                "type": {"type": "string", "enum": ["backend", "frontend", "background", "design"], "description": "The type of the service to start (backend, frontend, background worker)"},
+                "start_server_command": {"type": "string", "description": "The command to run the server, or install dependencies, etc."},
+                "explaination": {"type": "string", "description": "A short explaination of this task, along with the `command` in the Markdown format"}
             },
-            "required": ["container_port", "start_server_command"]
+            "required": ["container_port", "start_server_command", "explaination"]
         }
+    }
+}
+
+get_github_access_token = {
+    "type": "function",
+    "function": {
+        "name": "get_github_access_token",
+        "description": "Call this function to get the Github access token",
     }
 }
 
 # tools = [save_prd, get_prd, save_features, save_personas, design_schema, generate_tickets, write_code_file, read_code_file]
 
-tools = [execute_command, start_server]
+tools_code = [execute_command, start_server, get_github_access_token]
+tools_product = [save_prd, get_prd, save_features, save_personas, extract_features, extract_personas, design_schema, generate_tickets]
+tools_design = [get_prd, execute_command, start_server, get_github_access_token]

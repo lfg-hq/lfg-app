@@ -143,3 +143,8 @@ docker-compose.override.yml
 *.bak
 *.swp
 *.tmp 
+
+*.sqlite3
+*.sqlite3-journal
+*.db
+*.sqlitedb.sqlite3

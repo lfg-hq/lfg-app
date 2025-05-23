@@ -1,5 +1,8 @@
-from django.urls import path
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 from . import views
+from .views.main import user_agent_role, user_model_selection, available_models
+
 
 urlpatterns = [
     path('chat/', views.index, name='index'),
@@ -12,6 +15,11 @@ urlpatterns = [
     # File upload API endpoints
     path('api/files/upload/', views.upload_file, name='upload_file'),
     path('api/conversations/<int:conversation_id>/files/', views.conversation_files, name='conversation_files'),
-    # Note: The chat API endpoint (/api/chat/) has been removed
-    # as it's now handled by the WebSocket consumer in chat/consumers.py
+
+    # Single Agent Role API
+    path('api/user/agent-role/', user_agent_role, name='user_agent_role'),
+    
+    # Model Selection APIs
+    path('api/user/model-selection/', user_model_selection, name='user_model_selection'),
+    path('api/models/available/', available_models, name='available_models'),
 ] 

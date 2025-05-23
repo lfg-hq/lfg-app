@@ -510,14 +510,14 @@ body, html {
 
 #chat-input {
     flex: 1;
-    padding: 16px 20px;
+    padding: 16px 0 16px 20px;
     border-radius: 12px;
     border: 1px solid var(--border-color);
     background-color: var(--card-bg); /* Slightly lighter background */
     color: var(--text-color);
     resize: none;
-    max-height: 150px;
-    min-height: 20px;
+    min-height: 100px; /* Increased height */
+    max-height: 250px;
     transition: all 0.3s ease;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 0 20px rgba(187, 134, 252, 0.05); /* Enhanced glow */
     backdrop-filter: blur(5px); /* Subtle blur effect */
@@ -540,39 +540,28 @@ body, html {
     transform: translateY(-2px); /* Subtle lift effect when focused */
 }
 
-/* Send button styling */
+/* Send button styling - moved into the input box */
 #send-btn {
-    background-color: var(--primary-color);
-    color: #1e1e1e;
-    border: none;
-    border-radius: 50%;
-    width: 38px;
-    height: 38px;
-    font-size: 16px;
-    cursor: pointer;
-    margin-left: 10px;
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    background-color: rgba(187, 134, 252, 0.2);
+    color: var(--primary-color);
+    margin-left: 0;
 }
 
 #send-btn:hover {
-    transform: scale(1.1);
-    box-shadow: 0 0 10px rgba(187, 134, 252, 0.7);
+    transform: translateY(-2px);
+    box-shadow: 0 0 10px rgba(187, 134, 252, 0.3);
 }
 
 /* Stop button styling */
 #stop-btn {
-    background-color: #ef5350; /* Red color for stop */
-    color: white;
+    background-color: rgba(239, 83, 80, 0.2); /* Red color for stop with transparency */
+    color: #ef5350;
     border: none;
     border-radius: 50%;
-    width: 38px;
-    height: 38px;
-    font-size: 16px;
+    width: 28px;
+    height: 28px;
+    font-size: 12px;
     cursor: pointer;
-    margin-left: 10px;
     transition: all 0.2s ease;
     display: flex;
     align-items: center;
@@ -580,8 +569,8 @@ body, html {
 }
 
 #stop-btn:hover {
-    transform: scale(1.1);
-    box-shadow: 0 0 10px rgba(239, 83, 80, 0.7);
+    transform: translateY(-2px);
+    box-shadow: 0 0 10px rgba(239, 83, 80, 0.3);
 }
 
 .send-icon {

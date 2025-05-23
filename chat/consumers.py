@@ -7,15 +7,16 @@ from django.conf import settings
 # Import everything we need at the module level
 # These imports are safe now because django.setup() is called in asgi.py before imports
 from django.contrib.auth.models import User
-from chat.models import Conversation, Message, ChatFile
-from chat.utils import AIProvider, get_system_prompt
+from chat.models import Conversation, Message, ChatFile, ModelSelection
+from chat.utils import AIProvider, get_system_prompt_developer, get_system_prompt_design, get_system_prompt_product
 
 import os
 import base64
 import uuid
 from django.core.files.base import ContentFile
-from chat.models import ChatFile
+from chat.models import ChatFile, AgentRole
 from django.conf import settings
+from chat.utils.ai_tools import tools_code, tools_product, tools_design
 
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -113,7 +114,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 conversation_id = text_data_json.get('conversation_id')
                 project_id = text_data_json.get('project_id')
                 file_data = text_data_json.get('file')  # Get file data if present
+                user_role = text_data_json.get('user_role')  # Get user role if present
                 # file_id = text_data_json.get('file_id')  # Get file_id if present
+
+                
 
                 # print("\n\n\n\nFile ID: ", file_data.get('id'))
                 
@@ -166,7 +170,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 # Generate AI response in background task
                 # Store the task so we can cancel it if needed
                 self.active_generation_task = asyncio.create_task(
-                    self.generate_ai_response(user_message, provider_name, project_id)
+                    self.generate_ai_response(user_message, provider_name, project_id, user_role)
                 )
             
             elif message_type == 'stop_generation':
@@ -231,6 +235,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             print(f"Full event data: {event}")
             print("=======================================\n\n")
             
+            # Copy all notification-related fields to the response
             response_data['is_notification'] = True
             response_data['notification_type'] = event.get('notification_type', 'features')
             
@@ -239,9 +244,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 response_data['early_notification'] = True
                 response_data['function_name'] = event.get('function_name', '')
         
-        await self.send(text_data=json.dumps(response_data))
+        # Send the response to the client
+        try:
+            await self.send(text_data=json.dumps(response_data))
+            print(f"Successfully sent {'notification' if event.get('is_notification') else 'chunk'} to client")
+        except Exception as e:
+            print(f"Error sending response to client: {str(e)}")
     
-    async def generate_ai_response(self, user_message, provider_name, project_id=None):
+    async def generate_ai_response(self, user_message, provider_name, project_id=None, user_role=None):
         """
         Generate response from AI
         """
@@ -267,23 +277,52 @@ class ChatConsumer(AsyncWebsocketConsumer):
         
         # Get conversation history
         messages = await self.get_messages_for_ai()
-        
+
+        print("\n\n User Role: ", user_role)
+
+        agent_role, created = await database_sync_to_async(AgentRole.objects.get_or_create)(
+            user=self.user,
+            defaults={'name': 'product_analyst'}
+        )
+
+        print("\n\n Agent Role: ", agent_role.name)
+        user_role = agent_role.name
+
+        if user_role == "designer":
+            system_prompt = await get_system_prompt_design()
+            tools = tools_design
+        elif user_role == "product_analyst":
+            system_prompt = await get_system_prompt_product()
+            tools = tools_product
+        else:
+            system_prompt = await get_system_prompt_developer()
+            tools = tools_code
         # Add system message if not present
         if not any(msg["role"] == "system" for msg in messages):
             messages.insert(0, {
                 "role": "system",
-                "content": await get_system_prompt()
+                # "content": await get_system_prompt()
+                "content": system_prompt
             })
+
+        model_selection = await database_sync_to_async(ModelSelection.objects.get)(user=self.user)
+        selected_model = model_selection.selected_model
         
         # Get the appropriate AI provider
-        provider = AIProvider.get_provider(provider_name)
+        provider = AIProvider.get_provider(provider_name, selected_model)
+        
+        # Debug log to verify settings
+        print(f"\n[ChatConsumer Debug] Using provider: {provider_name}")
+        print(f"[ChatConsumer Debug] Project ID: {project_id}")
+        print(f"[ChatConsumer Debug] Conversation ID: {self.conversation.id if self.conversation else None}")
+        print(f"[ChatConsumer Debug] Message count: {len(messages)}")
         
         try:
             # Generate streaming response
             full_response = ""
             
             # Process the stream in an async context
-            async for content in self.process_ai_stream(provider, messages, project_id):
+            async for content in self.process_ai_stream(provider, messages, project_id, tools):
                 # Check if generation should stop
                 if self.should_stop_generation:
                     # Add a note to the response that generation was stopped
@@ -314,6 +353,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     
                     # Break out of the loop
                     break
+                
+                # Skip notification content from being added to the full response
+                if isinstance(content, str) and (
+                    (content.startswith("__NOTIFICATION__") and content.endswith("__NOTIFICATION__")) or
+                    (content.startswith("{") and content.endswith("}") and "is_notification" in content)
+                ):
+                    print(f"[ChatConsumer Debug] Skipping notification content from full response: {content[:30]}...")
+                    continue
                 
                 full_response += content
                 
@@ -434,7 +481,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             # Clear the active task reference
             self.active_generation_task = None
     
-    async def process_ai_stream(self, provider, messages, project_id):
+    async def process_ai_stream(self, provider, messages, project_id, tools):
         """
         Process the AI provider's stream in an async-friendly way
         
@@ -447,93 +494,166 @@ class ChatConsumer(AsyncWebsocketConsumer):
             loop = asyncio.get_running_loop()
             conversation_id = self.conversation.id if self.conversation else None
             
+            # Create a queue to pass chunks from the sync thread to the async context
+            chunk_queue = asyncio.Queue()
+            streaming_complete = asyncio.Event()
+            
             # Create a function that will process each item from the generator
             def process_stream():
-                result = []
-                # We'll capture all chunks in one go, as the actual AI providers may not
-                # support cancellation mid-stream
-                for content in provider.generate_stream(messages, project_id, conversation_id):
-                    result.append(content)
-                    # We yield by appending to a result list, then returning it
-                    # This approach avoids having to convert a generator to an async generator
-                return result
-            
-            # Run the synchronous generator in a thread pool and get all chunks
-            chunks = await loop.run_in_executor(None, process_stream)
-            
-            # Yield each chunk with a small delay to simulate typing
-            # This is where we can check the should_stop_generation flag
-            for chunk in chunks:
-                # Check if we should stop generation before yielding the next chunk
-                if self.should_stop_generation:
-                    print("Stopping AI stream generation due to user request")
-                    # We break here to stop yielding chunks, but the generation itself
-                    # has already completed in the background - this is just stopping
-                    # the delivery of chunks to the client
-                    break
-                
-                # Check if this is a notification JSON
-                if isinstance(chunk, str) and chunk.startswith('{') and chunk.endswith('}'):
-                    try:
-                        print("\n\n=== POTENTIAL NOTIFICATION JSON DETECTED ===")
-                        print(f"Raw chunk: {chunk}")
+                try:
+                    # Stream content directly as it comes in
+                    for content in provider.generate_stream(messages, project_id, conversation_id, tools):
+                        # Put each chunk in the queue as it arrives
+                        loop.call_soon_threadsafe(lambda c=content: chunk_queue.put_nowait(c))
                         
-                        notification_data = json.loads(chunk)
-                        print(f"Parsed JSON: {notification_data}")
-                        
-                        if 'is_notification' in notification_data and notification_data['is_notification']:
-                            print("This IS a valid notification!")
-                            print(f"Notification type: {notification_data.get('notification_type', 'features')}")
+                    # Signal that we're done streaming
+                    loop.call_soon_threadsafe(streaming_complete.set)
+                except Exception as e:
+                    print(f"Error in stream processing thread: {str(e)}")
+                    # Put the error in the queue so we can yield it
+                    error_msg = f"Error generating response: {str(e)}"
+                    loop.call_soon_threadsafe(lambda msg=error_msg: chunk_queue.put_nowait(msg))
+                    # Signal that we're done streaming (with error)
+                    loop.call_soon_threadsafe(streaming_complete.set)
+            
+            # Start the streaming process in a thread pool
+            thread_future = loop.run_in_executor(None, process_stream)
+            
+            # Process chunks as they arrive in the queue
+            while not streaming_complete.is_set() or not chunk_queue.empty():
+                # Use wait_for with a timeout to allow checking should_stop_generation periodically
+                try:
+                    chunk = await asyncio.wait_for(chunk_queue.get(), timeout=0.1)
+                    
+                    # Check if we should stop generation
+                    if self.should_stop_generation:
+                        print("Stopping AI stream generation due to user request")
+                        break
+                    
+                    # Check if this is a specially formatted notification string
+                    if isinstance(chunk, str) and chunk.startswith("__NOTIFICATION__") and chunk.endswith("__NOTIFICATION__"):
+                        try:
+                            # Extract the JSON between the markers
+                            notification_json = chunk[len("__NOTIFICATION__"):-len("__NOTIFICATION__")]
+                            print("\n\n=== DETECTED SPECIALLY FORMATTED NOTIFICATION ===")
+                            print(f"Notification JSON: {notification_json}")
                             
-                            # Check if this is an early notification
-                            is_early = notification_data.get('early_notification', False)
-                            function_name = notification_data.get('function_name', '')
-                            print(f"Is early notification__ 11: {is_early}")
-                            print(f"Function name for early notification: {function_name}")
-                            print("=======================================\n\n")
+                            notification_data = json.loads(notification_json)
+                            print(f"Parsed notification: {notification_data}")
                             
-                            # This is a notification - send it as a special message
-                            notification_message = {
-                                'type': 'ai_chunk',
-                                'chunk': '',  # No visible content
-                                'is_final': False,
-                                'is_notification': True,
-                                'notification_type': notification_data.get('notification_type', 'features')
-                            }
+                            # Verify this is a notification
+                            if notification_data.get('is_notification') and notification_data.get('notification_marker') == "__NOTIFICATION__":
+                                print("Valid notification confirmed!")
+                                
+                                # Check if this is an early notification
+                                is_early = notification_data.get('early_notification', False)
+                                function_name = notification_data.get('function_name', '')
+                                print(f"Is early notification: {is_early}")
+                                print(f"Function name: {function_name}")
+                                print("=======================================\n\n")
+                                
+                                # Create notification message to send to client
+                                notification_message = {
+                                    'type': 'ai_chunk',
+                                    'chunk': '',  # No visible content
+                                    'is_final': False,
+                                    'is_notification': True,
+                                    'notification_type': notification_data.get('notification_type', 'features')
+                                }
+                                
+                                # Add early notification flag and function name if present
+                                if is_early:
+                                    notification_message['early_notification'] = True
+                                    notification_message['function_name'] = function_name
+                                
+                                # Send notification to client
+                                if hasattr(self, 'using_groups') and self.using_groups:
+                                    await self.channel_layer.group_send(
+                                        self.room_group_name,
+                                        {
+                                            'type': 'ai_response_chunk',
+                                            **notification_message
+                                        }
+                                    )
+                                else:
+                                    await self.send(text_data=json.dumps(notification_message))
+                                
+                                # Skip yielding this chunk as text content
+                                continue
+                        except json.JSONDecodeError as e:
+                            print(f"Error parsing notification JSON: {e}")
+                            # Continue to normal processing if JSON parsing fails
+                        except Exception as e:
+                            print(f"Error processing notification: {e}")
+                            # Continue to normal processing if there's any other error
+                    
+                    
+                    # Also still keep the old JSON detection method for backward compatibility
+                    # Check if this is a notification JSON
+                    elif isinstance(chunk, str) and chunk.startswith('{') and chunk.endswith('}'):
+                        try:
+                            print("\n\n=== POTENTIAL NOTIFICATION JSON DETECTED ===")
+                            print(f"Raw chunk: {chunk}")
                             
-                            # Add early notification flag and function name if present
-                            if is_early:
-                                notification_message['early_notification'] = True
-                                notification_message['function_name'] = function_name
+                            notification_data = json.loads(chunk)
+                            print(f"Parsed JSON: {notification_data}")
                             
-                            if hasattr(self, 'using_groups') and self.using_groups:
-                                await self.channel_layer.group_send(
-                                    self.room_group_name,
-                                    {
-                                        'type': 'ai_response_chunk',
-                                        **notification_message
-                                    }
-                                )
+                            if 'is_notification' in notification_data and notification_data['is_notification']:
+                                print("This IS a valid notification!")
+                                print(f"Notification type: {notification_data.get('notification_type', 'features')}")
+                                
+                                # Check if this is an early notification
+                                is_early = notification_data.get('early_notification', False)
+                                function_name = notification_data.get('function_name', '')
+                                print(f"Is early notification__ 11: {is_early}")
+                                print(f"Function name for early notification: {function_name}")
+                                print("=======================================\n\n")
+                                
+                                # This is a notification - send it as a special message
+                                notification_message = {
+                                    'type': 'ai_chunk',
+                                    'chunk': '',  # No visible content
+                                    'is_final': False,
+                                    'is_notification': True,
+                                    'notification_type': notification_data.get('notification_type', 'features')
+                                }
+                                
+                                # Add early notification flag and function name if present
+                                if is_early:
+                                    notification_message['early_notification'] = True
+                                    notification_message['function_name'] = function_name
+                                
+                                if hasattr(self, 'using_groups') and self.using_groups:
+                                    await self.channel_layer.group_send(
+                                        self.room_group_name,
+                                        {
+                                            'type': 'ai_response_chunk',
+                                            **notification_message
+                                        }
+                                    )
+                                else:
+                                    await self.send(text_data=json.dumps(notification_message))
+                                continue  # Skip yielding this chunk as text
                             else:
-                                await self.send(text_data=json.dumps(notification_message))
-                            continue  # Skip yielding this chunk as text
-                        else:
-                            print("This is NOT a notification (missing is_notification flag)")
+                                print("This is NOT a notification (missing is_notification flag)")
+                                print("=======================================\n\n")
+                        except json.JSONDecodeError:
+                            print("Not a valid JSON - treating as normal text")
                             print("=======================================\n\n")
-                    except json.JSONDecodeError:
-                        print("Not a valid JSON - treating as normal text")
-                        print("=======================================\n\n")
-                        # Not a valid JSON notification, treat as normal text
-                        pass
-                
-                # Normal text chunk
-                yield chunk
-                
-                # After yielding a chunk, check again if we should stop
-                # This ensures we stop as soon as possible after a user request
-                if self.should_stop_generation:
-                    print("Stopping AI stream generation after yielding chunk")
-                    break
+                            # Not a valid JSON notification, treat as normal text
+                            pass
+                    
+                    # Normal text chunk - yield it
+                    yield chunk
+                    
+                except asyncio.TimeoutError:
+                    # No chunk available yet, just check if we should stop
+                    if self.should_stop_generation:
+                        print("Stopping AI stream generation while waiting for chunks")
+                        break
+            
+            # Wait for the thread to complete, to avoid any thread leaks
+            await thread_future
                 
         except Exception as e:
             print(f"Error in process_ai_stream: {str(e)}")

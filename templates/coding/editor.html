@@ -48,8 +48,154 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
     height: 35px;
     flex-shrink: 0;
     scrollbar-width: thin;
+    position: relative;
+    scroll-behavior: smooth;
+    padding-right: 35px; /* Make room for the add button */
+    padding-left: 35px; /* Make room for the menu button */
 }
 
+/* Hide scrollbar but keep functionality */
+#editor-tabs::-webkit-scrollbar {
+    height: 5px;
+    background: transparent;
+}
+
+#editor-tabs::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+}
+
+#editor-tabs:hover::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* Tabs menu button - positioned at the beginning */
+.tabs-menu-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 35px;
+    height: 35px;
+    background: #2d2d2d;
+    color: #ccc;
+    cursor: pointer;
+    font-size: 18px;
+    border: none;
+    border-right: 1px solid #1e1e1e;
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 10;
+}
+
+.tabs-menu-button:hover {
+    background: #3d3d3d;
+    color: #fff;
+}
+
+/* Tabs menu dropdown */
+.tabs-menu-dropdown {
+    position: fixed;
+    top: 35px;
+    left: 0;
+    background: #252526;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+    border: 1px solid #454545;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 9999;
+    min-width: 200px;
+    display: none;
+    opacity: 0;
+    transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out;
+    transform: translateY(-10px);
+    border-radius: 4px;
+}
+
+.tabs-menu-dropdown.show {
+    display: block !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    transform: translateY(0) !important;
+}
+
+/* Remove debugging outline */
+#tabs-menu-dropdown.show {
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.4);
+}
+
+/* Enhance tab menu items */
+.tab-menu-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+    color: #ccc;
+    border-bottom: 1px solid #333;
+    cursor: pointer;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background 0.15s ease;
+}
+
+.tab-menu-item:hover {
+    background: #37373d;
+}
+
+.tab-menu-item.active {
+    background: #094771;
+    color: #fff;
+}
+
+.tab-menu-item .tab-icon {
+    margin-right: 8px;
+    font-size: 14px;
+}
+
+.tab-menu-item .tab-close {
+    margin-left: auto;
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    font-size: 14px;
+    visibility: hidden;
+}
+
+.tab-menu-item:hover .tab-close {
+    visibility: visible;
+}
+
+.tab-menu-item .tab-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* Tab add button sticky to the right side */
+.tab-add-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 35px;
+    height: 35px;
+    background: transparent;
+    color: #ccc;
+    cursor: pointer;
+    font-size: 18px;
+    border: none;
+    position: absolute;
+    right: 0;
+    top: 0;
+    z-index: 10;
+}
+
+.tab-add-button:hover {
+    background: #333;
+}
+
+/* Modify editor tab to scroll properly */
 .editor-tab {
     display: flex;
     align-items: center;
@@ -64,6 +210,7 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
     position: relative;
     min-width: 100px;
     max-width: 200px;
+    flex-shrink: 0;
 }
 
 .editor-tab.active {
@@ -140,23 +287,6 @@ body{margin:0;padding:0;overflow:hidden;font-family:-apple-system,BlinkMacSystem
 
 @keyframes tab-spin {
     to { transform: rotate(360deg); }
-}
-
-.tab-add-button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 35px;
-    height: 35px;
-    background: transparent;
-    color: #ccc;
-    cursor: pointer;
-    font-size: 18px;
-    border: none;
-}
-
-.tab-add-button:hover {
-    background: #333;
 }
 
 /* Editor wrapper */
@@ -434,7 +564,12 @@ li.error-message {
 <div id="container">
     <!-- Explorer -->
     <div id="file-explorer">
-        <div class="explorer-title">EXPLORER</div>
+        <div class="explorer-title">
+            EXPLORER
+            <button id="refresh-file-explorer" title="Refresh File Explorer" style="background: transparent; border: none; cursor: pointer; float: right; padding: 0; margin-top: -2px; color: #888; transition: color 0.2s;">
+                <i class="mdi mdi-refresh" style="font-size: 16px;"></i>
+            </button>
+        </div>
         <div id="file-tree-container"></div>
     </div>
 
@@ -445,7 +580,15 @@ li.error-message {
     <div id="editor-container">
         <div id="editor-wrapper">
             <div id="editor-tabs">
+                <!-- Tabs menu button first -->
+                <button class="tabs-menu-button" id="tabs-menu-button" title="Show All Tabs">
+                    <i class="mdi mdi-dots-horizontal"></i>
+                </button>
+                <div class="tabs-menu-dropdown" id="tabs-menu-dropdown"></div>
+                
                 <!-- Tabs will be added dynamically via JavaScript -->
+                
+                <!-- Add button at the end -->
                 <button class="tab-add-button" id="add-new-tab" title="New File">
                     <i class="mdi mdi-plus"></i>
                 </button>
@@ -753,17 +896,247 @@ initTabsUI();
   Tabs Management Functions
 ─────────────────────────────────────────────────────────────*/
 function initTabsUI() {
+    console.log("Initializing tabs UI");
+    
+    // Initialize openTabs array if it doesn't exist
+    if (!window.openTabs) {
+        window.openTabs = [];
+        window.activeTabIndex = -1;
+    }
+    
     // Set up the "New Tab" button
     const addTabButton = document.getElementById('add-new-tab');
     if (addTabButton) {
-        addTabButton.addEventListener('click', () => {
+        console.log("Found add tab button");
+        addTabButton.addEventListener('click', function() {
+            console.log("Add tab button clicked");
             createNewTab('Untitled', '', 'plaintext');
         });
     }
+    
+    // Setup the tabs menu
+    setupTabsMenu();
 }
+
+// Add a direct setup function for the tabs menu
+function setupTabsMenu() {
+    console.log("Setting up tabs menu button");
+    
+    // Find the button
+    const tabsMenuButton = document.getElementById('tabs-menu-button');
+    if (!tabsMenuButton) {
+        console.error("Tabs menu button not found!");
+        return;
+    }
+    
+    // Create a new button to replace the old one
+    const newButton = document.createElement('button');
+    newButton.id = 'tabs-menu-button';
+    newButton.className = 'tabs-menu-button';
+    newButton.title = 'Show All Tabs';
+    newButton.innerHTML = '<i class="mdi mdi-dots-horizontal"></i>';
+    
+    // Use a simple onclick function
+    newButton.onclick = function(e) {
+        showTabsMenu(e);
+        return false;
+    };
+    
+    // Replace the old button
+    if (tabsMenuButton.parentNode) {
+        tabsMenuButton.parentNode.replaceChild(newButton, tabsMenuButton);
+        console.log("Tabs menu button replaced successfully");
+    }
+}
+
+// Separate function to show the menu
+function showTabsMenu(e) {
+    if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+    
+    console.log("SHOW TABS MENU CALLED", new Date().toISOString());
+    
+    // Remove any existing dropdown first
+    hideAllDropdowns();
+    
+    // Create content for dropdown
+    let menuContent = '';
+    
+    if (!window.openTabs || window.openTabs.length === 0) {
+        menuContent = '<div class="tab-menu-item">No open tabs</div>';
+        console.log("No tabs to show");
+    } else {
+        console.log(`Creating menu for ${window.openTabs.length} tabs`);
+        
+        window.openTabs.forEach((tab, index) => {
+            const isActive = index === window.activeTabIndex;
+            const iconClass = tab.path ? getFileIcon(tab.name) : 'file-document-outline';
+            
+            menuContent += `
+                <div class="tab-menu-item ${isActive ? 'active' : ''}" data-index="${index}">
+                    <span class="tab-icon"><i class="mdi mdi-${iconClass}"></i></span>
+                    <span class="tab-name">${tab.name}</span>
+                    <span class="tab-close" data-index="${index}"><i class="mdi mdi-close"></i></span>
+                </div>
+            `;
+        });
+    }
+    
+    // Get the menu button
+    const menuButton = document.getElementById('tabs-menu-button');
+    if (!menuButton) {
+        console.error("Menu button not found");
+        return;
+    }
+    
+    // Calculate position for the dropdown
+    const buttonRect = menuButton.getBoundingClientRect();
+    
+    // Create a new dropdown
+    const newDropdown = document.createElement('div');
+    newDropdown.id = 'tabs-menu-dropdown';
+    newDropdown.className = 'tabs-menu-dropdown';
+    newDropdown.style.position = 'fixed';
+    newDropdown.style.left = buttonRect.left + 'px';
+    newDropdown.style.top = (buttonRect.bottom) + 'px';
+    newDropdown.style.minWidth = '250px';
+    newDropdown.innerHTML = menuContent;
+    
+    // Add it to the document body
+    document.body.appendChild(newDropdown);
+    
+    // Force a repaint before showing
+    void newDropdown.offsetWidth;
+    
+    // Show the dropdown
+    newDropdown.classList.add('show');
+    
+    console.log("Created new dropdown element");
+    
+    // Add click event listeners for menu items
+    newDropdown.querySelectorAll('.tab-menu-item').forEach(item => {
+        item.onclick = function(e) {
+            if (!e.target.closest('.tab-close')) {
+                const index = parseInt(item.dataset.index, 10);
+                console.log(`Switching to tab ${index}`);
+                switchToTab(index);
+                hideAllDropdowns();
+            }
+        };
+    });
+    
+    // Add click event listeners for close buttons
+    newDropdown.querySelectorAll('.tab-close').forEach(closeBtn => {
+        closeBtn.onclick = function(e) {
+            e.stopPropagation();
+            const index = parseInt(closeBtn.dataset.index, 10);
+            console.log(`Closing tab ${index}`);
+            closeTab(index);
+            
+            // If we still have tabs, refresh the menu
+            if (window.openTabs && window.openTabs.length > 0) {
+                setTimeout(function() {
+                    showTabsMenu();
+                }, 100);
+            } else {
+                hideAllDropdowns();
+            }
+        };
+    });
+    
+    // Setup document click to close the menu when clicking outside
+    setTimeout(function() {
+        document.addEventListener('click', documentClickHandler);
+    }, 10);
+}
+
+// Function to hide all dropdowns
+function hideAllDropdowns() {
+    // Find all dropdown elements and remove them
+    const dropdowns = document.querySelectorAll('.tabs-menu-dropdown');
+    dropdowns.forEach(dropdown => {
+        dropdown.remove();
+    });
+    
+    // Also remove any event handlers
+    document.removeEventListener('click', documentClickHandler);
+}
+
+// Function to handle document clicks to close the menu
+function documentClickHandler(e) {
+    if (!e.target.closest('.tabs-menu-dropdown') && 
+        !e.target.closest('.tabs-menu-button')) {
+        console.log("Clicked outside menu, hiding");
+        hideAllDropdowns();
+    }
+}
+
+// Add direct global handlers for the tabs button
+document.addEventListener('DOMContentLoaded', function() {
+    // Directly add a global handler for the button
+    window.tabsMenuHandler = function(e) {
+        console.log("Global click handler triggered");
+        showTabsMenu(e || window.event);
+        return false;
+    };
+});
+
+// Override the setupTabsMenu function
+function setupTabsMenu() {
+    console.log("Setting up tabs menu with direct method handler");
+    
+    const tabsMenuButton = document.getElementById('tabs-menu-button');
+    if (!tabsMenuButton) {
+        console.error("Tabs menu button not found!");
+        return;
+    }
+    
+    // Create a fresh button to replace the old one
+    const newButton = document.createElement('button');
+    newButton.id = 'tabs-menu-button';
+    newButton.className = 'tabs-menu-button debug-visible';
+    newButton.title = 'Show All Tabs';
+    newButton.innerHTML = '<i class="mdi mdi-dots-horizontal"></i>';
+    newButton.setAttribute('onclick', 'window.tabsMenuHandler(event)');
+    
+    // Replace the old button
+    tabsMenuButton.parentNode.replaceChild(newButton, tabsMenuButton);
+    
+    console.log("Tabs menu button replaced with new one having global click handler");
+}
+
+// Add these handlers when the page loads
+window.addEventListener('DOMContentLoaded', function() {
+    console.log("DOM loaded - setting up tabs menu");
+    setupTabsMenu();
+});
+
+// Make sure we clean up and reinitialize everything on load
+window.addEventListener('load', function() {
+    console.log("Window loaded - ensuring tab system is initialized");
+    
+    // Initialize tabs UI
+    initTabsUI();
+    
+    // Make sure we have a tab open 
+    setTimeout(function() {
+        if (!window.openTabs || window.openTabs.length === 0) {
+            console.log("No tabs found, creating a welcome tab");
+            createNewTab('Welcome', '', 'plaintext', 'Welcome to the editor!');
+        }
+    }, 1000);
+});
 
 // Function to create a new tab
 function createNewTab(name, path, language, content = '') {
+    // Initialize the tabs array if it doesn't exist yet
+    if (!window.openTabs) {
+        window.openTabs = [];
+        window.activeTabIndex = -1;
+    }
+    
     // Check if the tab already exists
     const existingTabIndex = findTabByPath(path);
     if (existingTabIndex !== -1) {
@@ -847,7 +1220,18 @@ function switchToTab(index) {
         tabElement.classList.add('active');
         
         // Ensure the tab is visible by scrolling if needed
-        tabElement.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+        const tabsContainer = document.getElementById('editor-tabs');
+        if (tabsContainer) {
+            const containerRect = tabsContainer.getBoundingClientRect();
+            const tabRect = tabElement.getBoundingClientRect();
+            
+            // Check if tab is outside visible area
+            if (tabRect.left < containerRect.left || tabRect.right > containerRect.right) {
+                // Calculate scroll position to center the tab
+                const scrollLeft = tabElement.offsetLeft - (containerRect.width / 2) + (tabRect.width / 2);
+                tabsContainer.scrollTo({ left: scrollLeft, behavior: 'smooth' });
+            }
+        }
     }
     
     // Update the active tab index
@@ -2044,6 +2428,29 @@ function checkForFilesAfterInitialization() {
 window.addEventListener('load', function() {
     console.log("Window loaded - initializing editor and file explorer");
     
+    // Set up refresh button
+    const refreshButton = document.getElementById('refresh-file-explorer');
+    if (refreshButton) {
+        refreshButton.addEventListener('click', function() {
+            loadFileTree(true); // Force refresh when clicked
+            // Add a subtle rotation animation
+            this.querySelector('i').style.transition = 'transform 0.5s';
+            this.querySelector('i').style.transform = 'rotate(360deg)';
+            setTimeout(() => {
+                this.querySelector('i').style.transition = 'none';
+                this.querySelector('i').style.transform = 'rotate(0deg)';
+            }, 500);
+        });
+        
+        // Add hover effect
+        refreshButton.addEventListener('mouseover', function() {
+            this.style.color = '#0e639c';
+        });
+        refreshButton.addEventListener('mouseout', function() {
+            this.style.color = '#888';
+        });
+    }
+    
     // Get tokens first, then load the file tree
     updatePodTokens().then(() => {
         loadFileTree();
@@ -2622,6 +3029,104 @@ function loadFolderContents(folderPath, parentElement) {
         const childList = parentElement.querySelector('ul.file-tree');
         childList.innerHTML = `<li class="error-message">Failed to load contents: ${error.message}</li>`;
     });
+}
+
+// Separate the click handler for better organization
+function handleTabsMenuClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    console.log("===== TABS MENU BUTTON CLICKED =====");
+    console.log("Event details:", {
+        type: e.type,
+        target: e.target.tagName,
+        currentTarget: e.currentTarget.id,
+        bubbles: e.bubbles,
+        timestamp: new Date().toISOString()
+    });
+    
+    const tabsMenuDropdown = document.getElementById('tabs-menu-dropdown');
+    if (!tabsMenuDropdown) {
+        console.error("Dropdown element not found");
+        return;
+    }
+    
+    // Check if we have any tabs
+    console.log("Current tabs:", {
+        count: window.openTabs ? window.openTabs.length : 0,
+        activeIndex: window.activeTabIndex,
+        tabsInitialized: !!window.openTabs
+    });
+    
+    if (!window.openTabs || window.openTabs.length === 0) {
+        console.log("No tabs to display in menu");
+        tabsMenuDropdown.innerHTML = '<div class="tab-menu-item">No open tabs</div>';
+        tabsMenuDropdown.classList.toggle('show');
+        return;
+    }
+    
+    console.log(`Generating menu for ${window.openTabs.length} tabs:`, 
+                window.openTabs.map(tab => tab.name));
+    
+    // Generate menu items
+    let menuHtml = '';
+    window.openTabs.forEach((tab, index) => {
+        const isActive = index === window.activeTabIndex;
+        const iconClass = tab.path ? getFileIcon(tab.name) : 'file-document-outline';
+        
+        menuHtml += `
+            <div class="tab-menu-item ${isActive ? 'active' : ''}" data-index="${index}">
+                <span class="tab-icon"><i class="mdi mdi-${iconClass}"></i></span>
+                <span class="tab-name">${tab.name}</span>
+                <span class="tab-close" data-index="${index}"><i class="mdi mdi-close"></i></span>
+            </div>
+        `;
+    });
+    
+    tabsMenuDropdown.innerHTML = menuHtml;
+    
+    // Add click handlers for menu items
+    tabsMenuDropdown.querySelectorAll('.tab-menu-item').forEach(item => {
+        item.addEventListener('click', function(e) {
+            if (!e.target.closest('.tab-close')) {
+                const index = parseInt(item.dataset.index);
+                console.log(`Menu item clicked: switching to tab ${index} (${window.openTabs[index].name})`);
+                switchToTab(index);
+                tabsMenuDropdown.classList.remove('show');
+            }
+        });
+    });
+    
+    // Add click handlers for close buttons
+    tabsMenuDropdown.querySelectorAll('.tab-close').forEach(closeBtn => {
+        closeBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const index = parseInt(closeBtn.dataset.index);
+            console.log(`Close button clicked for tab ${index} (${window.openTabs[index].name})`);
+            closeTab(index);
+            
+            // Check if we still have tabs
+            if (window.openTabs.length > 0) {
+                // Regenerate the menu
+                console.log("Regenerating menu after tab close");
+                setTimeout(handleTabsMenuClick, 100, e);
+            } else {
+                // No tabs left, just hide the dropdown
+                console.log("No tabs left, hiding dropdown");
+                tabsMenuDropdown.classList.remove('show');
+            }
+        });
+    });
+    
+    // Toggle visibility with force repaint
+    const wasVisible = tabsMenuDropdown.classList.contains('show');
+    tabsMenuDropdown.classList.toggle('show');
+    
+    // Force a repaint to ensure the dropdown is visible
+    void tabsMenuDropdown.offsetWidth;
+    
+    console.log(`Dropdown visibility changed: ${wasVisible ? 'visible → hidden' : 'hidden → visible'}`);
+    console.log("===== END TABS MENU CLICK HANDLER =====");
 }
 </script>
 {% endif %}

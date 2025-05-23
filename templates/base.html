@@ -6,7 +6,9 @@
     <title>{% block title %}Projects - LFG 🚀🚀{% endblock %}</title>
     <link rel="stylesheet" href="/static/css/common.css">
     <link rel="stylesheet" href="/static/css/projects.css">
+    <link rel="stylesheet" href="/static/css/settings.css">
     <link rel="stylesheet" href="/static/css/auth.css">
+    <link rel="stylesheet" href="/static/css/integrations.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -57,6 +59,9 @@
                                     <div class="dropdown-menu">
                                         <a href="{% url 'profile' %}" class="dropdown-item">
                                             <i class="fas fa-user"></i> Profile
+                                        </a>
+                                        <a href="{% url 'integrations' %}" class="dropdown-item">
+                                            <i class="fas fa-plug"></i> Integrations
                                         </a>
                                         <a href="#" class="dropdown-item">
                                             <i class="fas fa-cog"></i> Settings

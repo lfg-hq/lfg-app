@@ -991,10 +991,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const btn = document.createElement('button');
         btn.id = 'send-btn';
         btn.type = 'submit';
-        btn.className = 'send-btn';
+        btn.className = 'action-btn';
         btn.innerHTML = '<i class="fas fa-paper-plane"></i>';
         btn.title = 'Send message';
-        chatForm.appendChild(btn);
+        
+        const inputActions = document.querySelector('.input-actions');
+        if (inputActions) {
+            inputActions.appendChild(btn);
+        } else {
+            chatForm.appendChild(btn);
+        }
         return btn;
     }
     
@@ -1005,29 +1011,44 @@ document.addEventListener('DOMContentLoaded', () => {
             stopBtn = document.createElement('button');
             stopBtn.id = 'stop-btn';
             stopBtn.type = 'button';
-            stopBtn.className = 'stop-btn';
+            stopBtn.className = 'action-btn';
             stopBtn.innerHTML = '<i class="fas fa-stop"></i>';
             stopBtn.title = 'Stop generating';
             
             // Add event listener to stop button
             stopBtn.addEventListener('click', stopGeneration);
-            
-            // Insert after (or in place of) the send button
-            chatForm.appendChild(stopBtn);
         }
         
-        // Show stop button, hide send button
-        sendBtn.style.display = 'none';
-        stopBtn.style.display = 'block';
+        // Handle the input actions container
+        const inputActions = document.querySelector('.input-actions');
+        const sendBtnContainer = sendBtn.parentElement;
+        
+        if (inputActions && sendBtnContainer === inputActions) {
+            // If send button is in input actions, replace it with stop button
+            inputActions.replaceChild(stopBtn, sendBtn);
+        } else {
+            // Otherwise just append to form
+            chatForm.appendChild(stopBtn);
+            sendBtn.style.display = 'none';
+        }
+        
         isStreaming = true;
     }
     
     // Function to hide stop button and show send button
     function hideStopButton() {
+        const inputActions = document.querySelector('.input-actions');
+        
         if (stopBtn) {
-            stopBtn.style.display = 'none';
+            if (inputActions && stopBtn.parentElement === inputActions) {
+                // If stop button is in input actions, replace it with send button
+                inputActions.replaceChild(sendBtn, stopBtn);
+            } else {
+                stopBtn.style.display = 'none';
+                sendBtn.style.display = 'block';
+            }
         }
-        sendBtn.style.display = 'block';
+        
         isStreaming = false;
     }
     
@@ -1083,6 +1104,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Reset stop requested flag
         stopRequested = false;
+        
+        // Get selected role from dropdown if it exists
+        let userRole = 'default';
+        const roleDropdown = document.getElementById('role-dropdown');
+        if (roleDropdown) {
+            userRole = roleDropdown.value;
+            console.log('Selected role:', userRole);
+        }
         
         // Get file data from the attached file (which may already have a file_id if it was uploaded)
         let fileData = null;
@@ -1146,7 +1175,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         fileData.id = fileResponse.id;
                         
                         // Now actually add the user message to chat with file data
-                        addMessageToChat('user', message, fileData);
+                        addMessageToChat('user', message, fileData, userRole);
                         
                         // Proceed with sending the message with the file_id
                         sendMessageToServer(message, fileData);
@@ -1155,7 +1184,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         console.error('Error uploading file before message:', error);
                         
                         // If file upload failed, still send the message without file_id
-                        addMessageToChat('user', message, fileData);
+                        addMessageToChat('user', message, fileData, userRole);
                         sendMessageToServer(message, fileData);
                         
                         // Re-enable input
@@ -1166,7 +1195,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.log('No conversation ID found. Sending message with file data.');
                 
                 // Add user message to chat with file data
-                addMessageToChat('user', message, fileData);
+                addMessageToChat('user', message, fileData, userRole);
                 
                 // For simplicity, we'll just send message without file_id
                 // The server will need to handle creating both conversation and file
@@ -1182,7 +1211,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Either no file is attached, or the file was already uploaded and has a file_id
             
             // Add user message to chat with file data (including file_id if available)
-            addMessageToChat('user', message, fileData);
+            addMessageToChat('user', message, fileData, userRole);
             
             // Proceed with standard message sending
             sendMessageToServer(message, fileData);
@@ -1209,13 +1238,22 @@ document.addEventListener('DOMContentLoaded', () => {
         // Show stop button since we're about to start streaming
         showStopButton();
         
+        // Get selected role from dropdown if it exists
+        let userRole = 'default';
+        const roleDropdown = document.getElementById('role-dropdown');
+        if (roleDropdown) {
+            userRole = roleDropdown.value;
+            console.log('Selected role for API request:', userRole);
+        }
+        
         // Prepare message data
         const messageData = {
             type: 'message',
             message: message,
             conversation_id: currentConversationId,
             provider: currentProvider,
-            project_id: currentProjectId
+            project_id: currentProjectId,
+            user_role: userRole
         };
         
         // Add project_id if available
@@ -1409,7 +1447,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Function to add a message to the chat
-    function addMessageToChat(role, content, fileData = null) {
+    function addMessageToChat(role, content, fileData = null, userRole = null) {
         // Skip adding empty messages
         if (!content || content.trim() === '') {
             console.log(`Skipping empty ${role} message`);
@@ -1419,6 +1457,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // Create message element
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${role}`;
+        
+        // If this is a user message and userRole is provided, add it as a data attribute
+        if (role === 'user' && userRole) {
+            messageDiv.dataset.userRole = userRole;
+        }
         
         // Create message content
         const contentDiv = document.createElement('div');
@@ -1431,6 +1474,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             // For user messages, just escape HTML and replace newlines with <br>
             contentDiv.textContent = content;
+
             
             // Add file attachment indicator if fileData is provided
             if (fileData) {
