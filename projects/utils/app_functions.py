@@ -3,6 +3,8 @@ import os
 import string
 import random
 import shlex
+import asyncio
+from channels.db import database_sync_to_async
 from projects.models import Project, ProjectFeature, ProjectPersona, \
                             ProjectPRD, ProjectDesignSchema, ProjectTickets, \
                             ProjectCodeGeneration
@@ -26,9 +28,80 @@ from coding.models import CommandExecution
 from accounts.models import GitHubToken
 
 
+# Async database operation wrappers
+@database_sync_to_async
+def get_project_async(project_id):
+    return Project.objects.get(id=project_id)
+
+@database_sync_to_async
+def get_project_features_async(project):
+    return list(ProjectFeature.objects.filter(project=project))
+
+@database_sync_to_async
+def create_project_feature_async(project, name, description, details, priority):
+    return ProjectFeature.objects.create(
+        project=project,
+        name=name,
+        description=description,
+        details=details,
+        priority=priority
+    )
+
+# Async wrapper for external AI calls
+async def analyze_features_async(feature_list, prd):
+    """Async wrapper for AI analysis"""
+    return await asyncio.to_thread(analyze_features, feature_list, prd)
+
+async def extract_features_async(function_args, project_id):
+    """
+    Async version of extract_features for better performance
+    """
+    print("Async feature extraction function called \n\n")
+    
+    if project_id is None:
+        return {
+            "is_notification": False,
+            "message_to_agent": "Error: project_id is required to save features"
+        }
+    
+    try:
+        project = await get_project_async(project_id)
+    except Project.DoesNotExist:
+        return {
+            "is_notification": False,
+            "message_to_agent": f"Error: Project with ID {project_id} does not exist"
+        }
+    
+    features = function_args.get('features', [])
+    
+    try:
+        # Create new features asynchronously
+        for feature in features:
+            await create_project_feature_async(
+                project=project,
+                name=feature['name'],
+                description=feature['description'],
+                details=feature['details'],
+                priority=feature['priority']
+            )
+        
+        return {
+            "is_notification": True,
+            "notification_type": "features",
+            "message_to_agent": f"Features have been saved in the database"
+        }
+    except Exception as e:
+        print(f"Error saving features: {str(e)}")
+        return {
+            "is_notification": False,
+            "message_to_agent": f"Error saving features: {str(e)}"
+        }
+
 def app_functions(function_name, function_args, project_id, conversation_id):
     """
     Return a list of all the functions that can be called by the AI
+    NOTE: This function contains blocking operations but is already wrapped 
+    in asyncio.to_thread() in ai_providers.py, so it won't block the event loop.
     """
     print(f"Function name: {function_name}")
     print(f"Function args: {function_args}")
