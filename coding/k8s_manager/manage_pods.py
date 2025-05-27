@@ -508,9 +508,9 @@ def create_kubernetes_pod(client, namespace, image="gitpod/workspace-full:latest
     # Default resource limits if not provided
     if not resource_limits:
         resource_limits = {
-            'memory': '200Mi',
+            'memory': '500Mi',
             'cpu': '250m',
-            'memory_requests': '100Mi',
+            'memory_requests': '200Mi',
             'cpu_requests': '100m'
         }
     

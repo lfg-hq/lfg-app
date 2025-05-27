@@ -753,7 +753,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         if not self.conversation:
             return []
             
-        messages = Message.objects.filter(conversation=self.conversation).order_by('-created_at')[:5]
+        messages = Message.objects.filter(conversation=self.conversation).order_by('-created_at')[:10]
         messages = reversed(list(messages))  # Convert to list and reverse
         # logger.debug(f"\n\n Messages: {messages}")
         return [

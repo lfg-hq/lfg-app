@@ -519,7 +519,7 @@ def get_k8s_file_tree(request):
             encoded_path = quote(api_path, safe='')
             api_endpoint = f"/api/resources/{encoded_path}"
 
-            print(f"\n\n\n\nAPI Endpoint: {api_endpoint}")
+            logger.debug(f"API Endpoint: {api_endpoint}")
             
             # Make API request to get directory contents
             success, response_data, error_message = filebrowser_api_request(
@@ -544,7 +544,7 @@ def get_k8s_file_tree(request):
             items = response_data.get('items', [])
             
             # Helper function to convert FileBrowser items to our tree format
-            def process_filebrowser_items(items, base_dir):
+            def process_filebrowser_items(items, base_dir, max_depth=2, current_depth=0):
                 result = []
                 for item in items:
                     name = item.get('name', '')
@@ -561,25 +561,35 @@ def get_k8s_file_tree(request):
                     }
                     
                     # For directories, we need to list their contents recursively
-                    if is_dir:
+                    # But limit the depth to avoid performance issues and errors
+                    if is_dir and current_depth < max_depth:
                         # Query for subdirectory contents
                         subdir_path = os.path.join(api_path, name).replace('\\', '/')
                         encoded_subdir_path = quote(subdir_path, safe='')
                         sub_endpoint = f"/api/resources/{encoded_subdir_path}"
                         
-                        sub_success, sub_response, sub_error = filebrowser_api_request(
-                            filebrowser_url=filebrowser_url,
-                            method="GET",
-                            endpoint=sub_endpoint
-                        )
-                        
-                        if sub_success:
-                            sub_items = sub_response.get('items', [])
-                            node['children'] = process_filebrowser_items(sub_items, path)
-                        else:
-                            # If we can't get subdirectory contents, set empty children
+                        try:
+                            sub_success, sub_response, sub_error = filebrowser_api_request(
+                                filebrowser_url=filebrowser_url,
+                                method="GET",
+                                endpoint=sub_endpoint
+                            )
+                            
+                            if sub_success and sub_response:
+                                sub_items = sub_response.get('items', [])
+                                node['children'] = process_filebrowser_items(sub_items, path, max_depth, current_depth + 1)
+                            else:
+                                # If we can't get subdirectory contents, set empty children
+                                node['children'] = []
+                                if sub_error and "404" not in str(sub_error):
+                                    logger.warning(f"Failed to get contents of subdirectory {subdir_path}: {sub_error}")
+                        except Exception as e:
+                            # Handle any exceptions gracefully
                             node['children'] = []
-                            logger.warning(f"Failed to get contents of subdirectory {subdir_path}: {sub_error}")
+                            logger.debug(f"Exception while fetching subdirectory {subdir_path}: {str(e)}")
+                    elif is_dir:
+                        # For directories beyond max depth, just mark as having children but don't fetch them
+                        node['children'] = []
                     
                     result.append(node)
                 
@@ -638,7 +648,7 @@ def get_k8s_file_content(request):
             elif conversation_id:
                 pod = KubernetesPod.objects.filter(conversation_id=conversation_id).first()
 
-            print(f"\n\n\n\nPod: {pod}")
+            logger.debug(f"Pod: {pod}")
             
             if not pod:
                 return JsonResponse({
@@ -692,7 +702,7 @@ def get_k8s_file_content(request):
             # Use the raw endpoint to get the file content directly
             api_endpoint = f"/api/raw/{encoded_path}"
 
-            print(f"\n\n\n\nAPI Endpoint: {api_endpoint}")
+            logger.debug(f"API Endpoint: {api_endpoint}")
             
             # Make API request to get the file content
             success, response_data, error_message = filebrowser_api_request(
@@ -701,9 +711,8 @@ def get_k8s_file_content(request):
                 endpoint=api_endpoint
             )
 
-            print(f"\n\n\n\nSuccess: {success}")
-
-            print(f"\n\n\n\nResponse Data: {response_data}")
+            logger.debug(f"Success: {success}")
+            logger.debug(f"Response Data type: {type(response_data)}")
             
             if not success:
                 return JsonResponse({
@@ -865,7 +874,30 @@ def save_k8s_file(request):
             # Prepare file content
             file_content = content.encode('utf-8')  # Encode the content as bytes
 
-            print(f"\n\n\n\nFile Content: {file_content}")
+            logger.debug(f"File Content length: {len(file_content)} bytes")
+            
+            # Create the directory structure if it doesn't exist
+            dir_path = os.path.dirname(abs_path)
+            if dir_path:
+                dir_data = {
+                    "item": {
+                        "path": dir_path,
+                        "type": "directory"
+                    }
+                }
+                dir_endpoint = f"/api/resources/{quote(dir_path, safe='')}"
+                dir_exists, _, _ = filebrowser_api_request(
+                    filebrowser_url=filebrowser_url,
+                    method="GET",
+                    endpoint=dir_endpoint
+                )
+                if not dir_exists:
+                    create_success, _, _ = filebrowser_api_request(
+                        filebrowser_url=filebrowser_url,
+                        method="POST",
+                        endpoint="/api/resources",
+                        data=dir_data
+                    )
             
             # According to FileBrowser API docs, use /api/raw/ endpoint for uploading raw file content
             raw_endpoint = f"/api/raw/{encoded_file_path}"
@@ -1685,7 +1717,7 @@ def get_filebrowser_auth_token(filebrowser_url):
         # Make API call to login and get token
         response = requests.post(
             f"{filebrowser_url.rstrip('/')}/api/login", 
-            # json=auth_data, 
+            json=auth_data, 
             timeout=5
         )
         
@@ -1705,9 +1737,6 @@ def get_filebrowser_auth_token(filebrowser_url):
                 
                 # The JWT token is returned directly as a string, not JSON
                 token = response.content.decode('utf-8')
-                
-                # If you need to print for debugging
-                print(f"\n\n\n\nToken: {token}")
                 
                 # Use the token directly - it doesn't need JSON parsing
                 return token

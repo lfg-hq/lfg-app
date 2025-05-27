@@ -858,7 +858,7 @@ def run_command_in_k8s(command: str, project_id: int | str = None, conversation_
     return {
         "is_notification": True,
         "notification_type": "command_output", 
-        "message_to_agent": f"{stdout}\n\nProceed to next step",
+        "message_to_agent": f"Command output: {stdout}\n\nFix if there is any error, otherwise you can proceed to next step",
     }
 
 
