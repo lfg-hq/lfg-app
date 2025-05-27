@@ -3,8 +3,6 @@ import os
 import string
 import random
 import shlex
-import asyncio
-from channels.db import database_sync_to_async
 from projects.models import Project, ProjectFeature, ProjectPersona, \
                             ProjectPRD, ProjectDesignSchema, ProjectTickets, \
                             ProjectCodeGeneration
@@ -20,88 +18,16 @@ from coding.docker.docker_utils import (
     get_client_project_folder_path,
     add_port_to_sandbox
 )
-from coding.k8s_manager.manage_pods import get_ssh_client_for_project, execute_remote_command
+from coding.k8s_manager.manage_pods import execute_command_in_pod, manage_kubernetes_pod
 
 from coding.models import KubernetesPod, KubernetesPortMapping
-from coding.k8s_manager import manage_kubernetes_pod, execute_command_in_pod
 from coding.models import CommandExecution
 from accounts.models import GitHubToken
 
 
-# Async database operation wrappers
-@database_sync_to_async
-def get_project_async(project_id):
-    return Project.objects.get(id=project_id)
-
-@database_sync_to_async
-def get_project_features_async(project):
-    return list(ProjectFeature.objects.filter(project=project))
-
-@database_sync_to_async
-def create_project_feature_async(project, name, description, details, priority):
-    return ProjectFeature.objects.create(
-        project=project,
-        name=name,
-        description=description,
-        details=details,
-        priority=priority
-    )
-
-# Async wrapper for external AI calls
-async def analyze_features_async(feature_list, prd):
-    """Async wrapper for AI analysis"""
-    return await asyncio.to_thread(analyze_features, feature_list, prd)
-
-async def extract_features_async(function_args, project_id):
-    """
-    Async version of extract_features for better performance
-    """
-    print("Async feature extraction function called \n\n")
-    
-    if project_id is None:
-        return {
-            "is_notification": False,
-            "message_to_agent": "Error: project_id is required to save features"
-        }
-    
-    try:
-        project = await get_project_async(project_id)
-    except Project.DoesNotExist:
-        return {
-            "is_notification": False,
-            "message_to_agent": f"Error: Project with ID {project_id} does not exist"
-        }
-    
-    features = function_args.get('features', [])
-    
-    try:
-        # Create new features asynchronously
-        for feature in features:
-            await create_project_feature_async(
-                project=project,
-                name=feature['name'],
-                description=feature['description'],
-                details=feature['details'],
-                priority=feature['priority']
-            )
-        
-        return {
-            "is_notification": True,
-            "notification_type": "features",
-            "message_to_agent": f"Features have been saved in the database"
-        }
-    except Exception as e:
-        print(f"Error saving features: {str(e)}")
-        return {
-            "is_notification": False,
-            "message_to_agent": f"Error saving features: {str(e)}"
-        }
-
 def app_functions(function_name, function_args, project_id, conversation_id):
     """
     Return a list of all the functions that can be called by the AI
-    NOTE: This function contains blocking operations but is already wrapped 
-    in asyncio.to_thread() in ai_providers.py, so it won't block the event loop.
     """
     print(f"Function name: {function_name}")
     print(f"Function args: {function_args}")
@@ -885,8 +811,6 @@ def run_command_in_k8s(command: str, project_id: int | str = None, conversation_
     """
     Run a command in the terminal using Kubernetes pod.
     """
-    # Fetch the Client first
-    client = get_ssh_client_for_project(project_id)
 
     if project_id:
         pod = KubernetesPod.objects.filter(project_id=project_id).first()
@@ -906,10 +830,12 @@ def run_command_in_k8s(command: str, project_id: int | str = None, conversation_
     stderr = ""
 
     if pod:
-        k8s_command = f"kubectl exec -n {pod.namespace} {pod.pod_name} -- bash -c {shlex.quote(command_to_run)}"
-
-        # execute the command in the k8s pod
-        success, stdout, stderr = execute_remote_command(client, k8s_command)
+        # Execute the command using the Kubernetes API function
+        success, stdout, stderr = execute_command_in_pod(
+            project_id=project_id,
+            conversation_id=conversation_id,
+            command=command_to_run
+        )
 
         print(f"\n\nCommand output: {stdout}")
 
@@ -950,8 +876,10 @@ def server_command_in_k8s(command: str, project_id: int | str = None, conversati
     Returns:
         Dict containing command output and port mapping information
     """
-    # Fetch the Client first
-    client = get_ssh_client_for_project(project_id)
+    from coding.k8s_manager.manage_pods import execute_command_in_pod, get_k8s_api_client
+    from coding.models import KubernetesPod, KubernetesPortMapping
+    from kubernetes import client as k8s_client
+    from kubernetes.client.rest import ApiException
 
     print(f"\n\nApplication port: {application_port}")
     print(f"\n\nType: {type}")
@@ -1010,90 +938,135 @@ def server_command_in_k8s(command: str, project_id: int | str = None, conversati
             print(f"Using existing port mapping for {port_type} port {application_port}")
             node_port = existing_mapping.node_port
         else:
-            # Need to add port to service and create mapping
+            # Need to add port to service and create mapping using Kubernetes API
             print(f"Creating new port mapping for {port_type} port {application_port}")
             
-            # Define a unique port name for this application port
-            port_name = f"{port_type}-{application_port}"
-            
-            # Patch the service to add the new port
-            patch_yaml = f"""
-spec:
-  ports:
-  - name: {port_name}
-    port: {application_port}
-    targetPort: {application_port}
-    protocol: TCP
-"""
-            # Apply the patch to add the new port to the service
-            success, stdout, stderr = execute_remote_command(
-                client, f"kubectl patch service {service_name} -n {pod.namespace} --type=strategic -p '{patch_yaml}'"
-            )
-            
-            if not success:
+            # Get Kubernetes API client
+            api_client, core_v1_api, apps_v1_api = get_k8s_api_client()
+            if not core_v1_api:
                 return {
                     "is_notification": True,
                     "notification_type": "command_error",
-                    "message_to_agent": f"Failed to add port to service: {stderr}"
+                    "message_to_agent": f"Failed to connect to Kubernetes API"
                 }
-                
-            # Get the nodePort that Kubernetes assigned
-            success, stdout, stderr = execute_remote_command(
-                client, f"kubectl get service {service_name} -n {pod.namespace} -o jsonpath='{{.spec.ports[?(@.name==\"{port_name}\")].nodePort}}'"
-            )
             
-            if not success or not stdout:
+            try:
+                # Get the current service
+                service = core_v1_api.read_namespaced_service(
+                    name=service_name,
+                    namespace=pod.namespace
+                )
+                
+                # Define a unique port name for this application port
+                port_name = f"{port_type}-{application_port}"
+                
+                # Check if port already exists in service
+                existing_port = None
+                for port in service.spec.ports:
+                    if port.port == application_port or port.name == port_name:
+                        existing_port = port
+                        break
+                
+                if existing_port:
+                    node_port = existing_port.node_port
+                    print(f"Port {application_port} already exists in service with nodePort {node_port}")
+                else:
+                    # Add new port to service
+                    new_port = k8s_client.V1ServicePort(
+                        name=port_name,
+                        port=application_port,
+                        target_port=application_port,
+                        protocol="TCP"
+                    )
+                    
+                    # Add the new port to the existing ports
+                    service.spec.ports.append(new_port)
+                    
+                    # Update the service
+                    updated_service = core_v1_api.patch_namespaced_service(
+                        name=service_name,
+                        namespace=pod.namespace,
+                        body=service
+                    )
+                    
+                    # Get the assigned nodePort
+                    for port in updated_service.spec.ports:
+                        if port.name == port_name:
+                            node_port = port.node_port
+                            break
+                    else:
+                        return {
+                            "is_notification": True,
+                            "notification_type": "command_error",
+                            "message_to_agent": f"Failed to get nodePort for port {application_port}"
+                        }
+                    
+                    print(f"Kubernetes assigned nodePort {node_port} for {port_type} port {application_port}")
+                
+                # Get node IP using Kubernetes API
+                try:
+                    nodes = core_v1_api.list_node()
+                    node_ip = "localhost"
+                    if nodes.items:
+                        for address in nodes.items[0].status.addresses:
+                            if address.type == "InternalIP":
+                                node_ip = address.address
+                                break
+                except Exception as e:
+                    print(f"Warning: Could not get node IP: {e}")
+                    node_ip = "localhost"
+                
+                # Create port mapping in database if it doesn't exist
+                if not existing_mapping:
+                    description = f"{port_type.capitalize()} service"
+                    KubernetesPortMapping.objects.create(
+                        pod=pod,
+                        container_name="dev-environment",
+                        container_port=application_port,
+                        service_port=application_port,
+                        node_port=node_port,
+                        protocol="TCP",
+                        service_name=service_name,
+                        description=description
+                    )
+                
+                # Update pod's service_details
+                service_details = pod.service_details or {}
+                app_port_key = f"{port_type}Port"
+                app_url_key = f"{port_type}Url"
+                
+                service_details[app_port_key] = node_port
+                service_details["nodeIP"] = node_ip
+                service_details[app_url_key] = f"http://{node_ip}:{node_port}"
+                
+                pod.service_details = service_details
+                pod.save()
+                
+            except ApiException as e:
                 return {
                     "is_notification": True,
                     "notification_type": "command_error",
-                    "message_to_agent": f"Failed to get nodePort for port {application_port}: {stderr}"
+                    "message_to_agent": f"Failed to update service: {e}"
                 }
-                
-            node_port = stdout.strip()
-            print(f"Kubernetes assigned nodePort {node_port} for {port_type} port {application_port}")
-            
-            # Get node IP 
-            success, stdout, stderr = execute_remote_command(
-                client, "kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type==\"InternalIP\")].address}'"
-            )
-            
-            node_ip = stdout.strip() if success and stdout else "localhost"
-            
-            # Create port mapping in database
-            description = f"{port_type.capitalize()} service"
-            KubernetesPortMapping.objects.create(
-                pod=pod,
-                container_name="dev-environment",
-                container_port=application_port,
-                service_port=application_port,
-                node_port=node_port,
-                protocol="TCP",
-                service_name=service_name,
-                description=description
-            )
-            
-            # Update pod's service_details
-            service_details = pod.service_details or {}
-            app_port_key = f"{port_type}Port"
-            app_url_key = f"{port_type}Url"
-            
-            service_details[app_port_key] = node_port
-            service_details["nodeIP"] = node_ip
-            service_details[app_url_key] = f"http://{node_ip}:{node_port}"
-            
-            pod.service_details = service_details
-            pod.save()
+            except Exception as e:
+                return {
+                    "is_notification": True,
+                    "notification_type": "command_error",
+                    "message_to_agent": f"Error setting up port mapping: {str(e)}"
+                }
     
-    # Prepare and run the command in the pod
+    # Prepare and run the command in the pod using Kubernetes API
     kill_command = "pkill -f 'python -m http.server 4500' || true"
-
     full_command = f"mkdir -p /workspace/tmp && cd /workspace && {kill_command} && {command} > /workspace/tmp/cmd_output.log 2>&1 &"
     print(f"\n\nCommand: {full_command}")
 
-    k8s_command = f"kubectl exec -n {pod.namespace} {pod.pod_name} -- bash -c {shlex.quote(full_command)}"
-
-    # Execute the command in the k8s pod
-    success, stdout, stderr = execute_remote_command(client, k8s_command)
+    # Execute the command using the Kubernetes API function
+    success, stdout, stderr = execute_command_in_pod(
+        project_id=project_id,
+        conversation_id=conversation_id,
+        command=full_command
+    )
+    
     print(f"\n\nCommand output: {stdout}")
 
     if not success:
@@ -1122,33 +1095,33 @@ spec:
     }
 
 
-def run_command(command: str, project_id: int | str = None, conversation_id: int | str = None, use_k8s: bool = False) -> dict:
-    """
-    Run a command in the terminal using either Docker or Kubernetes.
-    This function serves as a dispatcher between Docker and Kubernetes command execution.
+# def run_command(command: str, project_id: int | str = None, conversation_id: int | str = None, use_k8s: bool = False) -> dict:
+#     """
+#     Run a command in the terminal using either Docker or Kubernetes.
+#     This function serves as a dispatcher between Docker and Kubernetes command execution.
     
-    Args:
-        command: The command to run
-        project_id: The project ID (optional if conversation_id is provided)
-        conversation_id: The conversation ID (optional if project_id is provided)
-        use_k8s: Boolean flag to force using Kubernetes instead of Docker
+#     Args:
+#         command: The command to run
+#         project_id: The project ID (optional if conversation_id is provided)
+#         conversation_id: The conversation ID (optional if project_id is provided)
+#         use_k8s: Boolean flag to force using Kubernetes instead of Docker
         
-    Returns:
-        Dict containing command output information
-    """
-    # Determine whether to use Kubernetes or Docker
-    use_kubernetes = use_k8s
+#     Returns:
+#         Dict containing command output information
+#     """
+#     # Determine whether to use Kubernetes or Docker
+#     use_kubernetes = use_k8s
     
-    # Get the EXECUTION_ENVIRONMENT from environment or fallback to Docker
-    execution_env = os.environ.get('EXECUTION_ENVIRONMENT', 'docker').lower()
-    if execution_env == 'kubernetes':
-        use_kubernetes = True
+#     # Get the EXECUTION_ENVIRONMENT from environment or fallback to Docker
+#     execution_env = os.environ.get('EXECUTION_ENVIRONMENT', 'docker').lower()
+#     if execution_env == 'kubernetes':
+#         use_kubernetes = True
     
-    # Execute the command in the appropriate environment
-    if use_kubernetes:
-        print("Using Kubernetes for command execution")
-        return run_command_k8s(command, project_id, conversation_id)
-    else:
-        print("Using Docker for command execution")
-        return run_command_docker(command, project_id, conversation_id)
+#     # Execute the command in the appropriate environment
+#     if use_kubernetes:
+#         print("Using Kubernetes for command execution")
+#         return run_command_k8s(command, project_id, conversation_id)
+#     else:
+#         print("Using Docker for command execution")
+#         return run_command_docker(command, project_id, conversation_id)
     

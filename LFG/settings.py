@@ -183,3 +183,13 @@ DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'noreply@lfg.run')
 # You should set these in environment variables or .env file
 GITHUB_CLIENT_ID = os.getenv('GITHUB_CLIENT_ID', '')
 GITHUB_CLIENT_SECRET = os.getenv('GITHUB_CLIENT_SECRET', '') 
+
+# Kubernetes API Configuration
+K8S_API_HOST = os.getenv('K8S_CLUSTER_HOST', "https://178.156.148.88:6443")
+K8S_NODE_SSH_HOST = os.getenv('K8S_NODE_SSH_HOST', "178.156.138.23")
+K8S_API_TOKEN = os.getenv('K8S_PERMANENT_TOKEN', "")
+K8S_CA_CERT = os.getenv('K8S_CA_CERTIFICATE', "")
+K8S_VERIFY_SSL = False  # Disabled by default since CA cert verification is problematic
+K8S_DEFAULT_NAMESPACE = "lfg"
+SSH_USERNAME=os.getenv('SSH_USERNAME', 'root')
+SSH_KEY_STRING=os.getenv('SSH_KEY_STRING', None)

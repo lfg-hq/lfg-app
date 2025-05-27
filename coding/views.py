@@ -9,7 +9,7 @@ import shutil
 from coding.models import DockerSandbox, KubernetesPod
 from django.db.models import Q
 from .docker.docker_utils import get_sandbox_by_project_id
-from coding.k8s_manager import manage_kubernetes_pod, execute_command_in_pod, delete_kubernetes_pod
+from coding.k8s_manager.manage_pods import manage_kubernetes_pod, execute_command_in_pod, delete_kubernetes_pod, get_pod_service_details, get_k8s_api_client
 import time
 import logging
 import requests
@@ -468,6 +468,20 @@ def get_k8s_file_tree(request):
             
             # Get the filebrowser URL
             filebrowser_url = None
+            
+            # Force refresh service details to ensure we have the latest port information
+            try:
+                api_client, core_v1_api, apps_v1_api = get_k8s_api_client()
+                if core_v1_api:
+                    success, _, fresh_service_details = get_pod_service_details(api_client, pod.namespace, pod.pod_name)
+                    if success and fresh_service_details:
+                        logger.info(f"Refreshed service details: {fresh_service_details}")
+                        pod.service_details = fresh_service_details
+                        pod.save(update_fields=['service_details'])
+                        logger.info("Updated pod with fresh service details")
+            except Exception as e:
+                logger.warning(f"Failed to refresh service details: {e}")
+            
             if pod.service_details and 'filebrowserUrl' in pod.service_details:
                 filebrowser_url = pod.service_details.get('filebrowserUrl')
             else:

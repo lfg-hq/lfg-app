@@ -49,4 +49,6 @@ In addition to Kubernetes pods, the platform also supports local Docker-based sa
 
 ## License
 
-LFG is proprietary software. All rights reserved. 
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+**Trademark Notice:** "LFG" and "lfg.run" are trademarks. The MIT license does not grant trademark rights. 
